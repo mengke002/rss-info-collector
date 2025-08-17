@@ -1,0 +1,20 @@
+Service URI
+mysql://avnadmin:AVNS_cqDKnvGiRkyVk9-0aoe@mysql-ai001.h.aivencloud.com:27976/defaultdb?ssl-mode=REQUIRED
+
+Database name
+defaultdb
+
+Host
+mysql-ai001.h.aivencloud.com
+
+Port
+27976
+
+User
+avnadmin
+
+Password
+AVNS_cqDKnvGiRkyVk9-0aoe
+
+SSL mode
+REQUIRED

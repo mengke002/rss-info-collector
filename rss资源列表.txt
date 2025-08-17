@@ -1,0 +1,41 @@
+BetaList：https://betalist.com/
+RSS：https://feeds.feedburner.com/BetaList
+（在id节点的链接后，添加/vist组成新的url，这是实际推荐的app网站的地址；每半小时爬取一次）
+
+---------
+
+producthunt：https://www.producthunt.com/
+RSS：https://www.producthunt.com/feed
+（有cloudflare反爬，检查一下是否需要使用playwright或者其他策略；每半小时爬取一次）
+
+---------
+
+ycombinator：https://news.ycombinator.com/
+RSS：https://rsshub.app/hackernews
+（里面的link内容包含实际news的地址，需要用crawl4ai进一步爬取；每半小时爬取一次）
+
+---------
+
+techcrunch：https://techcrunch.com/
+RSS：https://rsshub.app/techcrunch/news
+（每半小时爬取一次）
+
+---------
+
+The Verge：https://www.theverge.com/ai-artificial-intelligence
+RSS：https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+（每半小时爬取一次）
+
+---------
+
+indiehackers：https://www.indiehackers.com/
+RSS：https://ihrss.io/top/all-time（一个月爬一次）
+RSS：https://ihrss.io/top/month（一周爬一次）
+RSS：https://ihrss.io/top/week（每天爬一次）
+RSS：https://ihrss.io/top/today（半小时爬一次）
+RSS：https://ihrss.io/group/growth（半小时爬一次）
+RSS：https://ihrss.io/group/developers（半小时爬一次）
+RSS：https://ihrss.io/group/saas-marketing（半小时爬一次）
+（增量入库，https://ihrss.io/top/today中解析到的所有没有description的item：
+- 如果link格式形如 https://www.indiehackers.com/...post=xxxxxx的，则转换为https://www.indiehackers.com/post/xxxxxx，再用crawl4ai爬取和记录
+- 如果link格式形如 https://www.indiehackers.com/post/xxxx，则用crawl4ai直接爬取）
