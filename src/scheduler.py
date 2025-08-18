@@ -9,20 +9,20 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 
 from .config import config
-from .database import db_manager
 from .rss_parser import rss_parser
 from .logger import logger
 
 class RSSScheduler:
     """RSS任务调度器"""
     
-    def __init__(self):
+    def __init__(self, config, db_manager):
         """初始化调度器"""
         self.feed_configs = config.get_feed_configs()
+        self.db_manager = db_manager
         self.running = False
         self.threads = []
     
-    def run_crawl_task(self) -> Dict[str, Any]:
+    def run_crawl_task(self, feed_to_crawl: str = None) -> Dict[str, Any]:
         """执行爬取任务"""
         logger.info("开始执行RSS爬取任务")
         
@@ -33,16 +33,24 @@ class RSSScheduler:
             'errors': []
         }
         
-        for feed_name, feed_config in self.feed_configs.items():
+        feeds = self.feed_configs
+        if feed_to_crawl:
+            if feed_to_crawl not in feeds:
+                results['success'] = False
+                results['errors'].append(f"Feed '{feed_to_crawl}' not found in configuration.")
+                return results
+            feeds = {feed_to_crawl: feeds[feed_to_crawl]}
+
+        for feed_name, feed_config in feeds.items():
             try:
                 logger.info(f"处理RSS源: {feed_name}")
                 
                 # 获取已存在的GUID
                 table_name = f"rss_{feed_name}"
-                existing_guids = db_manager.get_existing_guids(table_name)
+                existing_guids = self.db_manager.get_existing_guids(table_name)
                 
                 # 解析RSS
-                items = rss_parser.parse_feed(feed_config['rss_url'])
+                items = rss_parser.parse_feed(feed_config)
                 
                 # 过滤新条目
                 new_items = []
@@ -55,9 +63,9 @@ class RSSScheduler:
                 for item in new_items:
                     # 特殊处理
                     if feed_name == 'betalist':
-                        item['visit_url'] = rss_parser.extract_visit_url(item['link'], 'betalist')
+                        item['visit_url'] = rss_parser.extract_visit_url(item['guid'], 'betalist')
                     
-                    if db_manager.insert_rss_item(table_name, item):
+                    if self.db_manager.insert_rss_item(table_name, item):
                         inserted_count += 1
                 
                 logger.info(f"{feed_name}: 新增 {inserted_count} 条记录")
@@ -89,7 +97,7 @@ class RSSScheduler:
         for feed_name in self.feed_configs.keys():
             table_name = f"rss_{feed_name}"
             try:
-                deleted_count = db_manager.cleanup_old_data(table_name, days)
+                deleted_count = self.db_manager.cleanup_old_data(table_name, days)
                 results['deleted_counts'][feed_name] = deleted_count
                 results['total_deleted'] += deleted_count
                 logger.info(f"{table_name}: 删除 {deleted_count} 条旧记录")
@@ -112,7 +120,7 @@ class RSSScheduler:
         for feed_name in self.feed_configs.keys():
             table_name = f"rss_{feed_name}"
             try:
-                stats = db_manager.get_stats(table_name)
+                stats = self.db_manager.get_stats(table_name)
                 results['stats'][feed_name] = stats
                 logger.info(f"{feed_name}: {stats}")
             except Exception as e:
@@ -157,10 +165,10 @@ class RSSScheduler:
             
             # 获取已存在的GUID
             table_name = f"rss_{feed_name}"
-            existing_guids = db_manager.get_existing_guids(table_name)
+            existing_guids = self.db_manager.get_existing_guids(table_name)
             
             # 解析RSS
-            items = rss_parser.parse_feed(feed_config['rss_url'])
+            items = rss_parser.parse_feed(feed_config)
             
             # 过滤新条目
             new_items = []
@@ -172,9 +180,9 @@ class RSSScheduler:
             inserted_count = 0
             for item in new_items:
                 if feed_name == 'betalist':
-                    item['visit_url'] = rss_parser.extract_visit_url(item['link'], 'betalist')
+                    item['visit_url'] = rss_parser.extract_visit_url(item['guid'], 'betalist')
                 
-                if db_manager.insert_rss_item(table_name, item):
+                if self.db_manager.insert_rss_item(table_name, item):
                     inserted_count += 1
             
             logger.info(f"定时任务 - {feed_name}: 新增 {inserted_count} 条记录")
@@ -202,6 +210,3 @@ class RSSScheduler:
         logger.info("停止RSS调度器")
         self.running = False
         schedule.clear()
-
-# 全局调度器实例
-scheduler = RSSScheduler()
