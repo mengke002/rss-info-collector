@@ -7,6 +7,9 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 import html
 import re
+import io
+import asyncio
+from crawl4ai import AsyncWebCrawler
 
 from .logger import logger
 
@@ -25,220 +28,199 @@ class RSSParser:
             'Connection': 'keep-alive'
         })
     
-    def parse_feed(self, url: str) -> List[Dict[str, Any]]:
+    def parse_feed(self, feed_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """解析RSS源"""
+        url = feed_config['rss_url']
+        strategy = feed_config.get('strategy', 'requests')
+
+        if strategy == 'crawl4ai':
+            return asyncio.run(self._parse_with_crawl4ai(url))
+        else:
+            return self._parse_with_requests(url)
+
+    def _parse_with_requests(self, url: str) -> List[Dict[str, Any]]:
+        """使用requests解析RSS源"""
         try:
             response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
+            content = response.content.decode('utf-8', errors='ignore')
+            return self._parse_xml_content(content, url)
+        except Exception as e:
+            logger.error(f"Failed to parse RSS feed {url} with requests: {e}")
+            return []
+
+    async def _parse_with_crawl4ai(self, url: str) -> List[Dict[str, Any]]:
+        """使用crawl4ai解析RSS源（异步）"""
+        try:
+            from bs4 import BeautifulSoup
+            async with AsyncWebCrawler() as crawler:
+                result = await crawler.arun(url=url)
             
-            # 处理可能的编码问题
-            content = response.content.decode('utf-8')
+            soup = BeautifulSoup(result.html, 'html.parser')
+            xml_div = soup.find('div', {'id': 'webkit-xml-viewer-source-xml'})
+            if xml_div:
+                rss_tag = xml_div.find('rss')
+                if rss_tag:
+                    xml_content = str(rss_tag)
+                    return self._parse_xml_content(xml_content, url)
             
-            # 解析XML
-            root = ET.fromstring(content)
-            
-            # 处理命名空间
-            namespaces = {
-                'atom': 'http://www.w3.org/2005/Atom',
-                'content': 'http://purl.org/rss/1.0/modules/content/',
-                'dc': 'http://purl.org/dc/elements/1.1/',
-                'media': 'http://search.yahoo.com/mrss/'
-            }
-            
-            # 确定格式并提取条目
-            items = []
-            
-            if root.tag.endswith('rss'):
-                # RSS格式
-                channel = root.find('channel')
-                if channel is not None:
-                    for item in channel.findall('item'):
-                        parsed_item = self._parse_rss_item(item)
-                        if parsed_item:
-                            items.append(parsed_item)
-            
-            elif root.tag.endswith('feed'):
-                # Atom格式
-                for entry in root.findall('atom:entry', namespaces):
-                    parsed_item = self._parse_atom_item(entry, namespaces)
+            # If the div or rss tag is not found, try to parse the whole html
+            return self._parse_xml_content(result.html, url)
+        except Exception as e:
+            logger.error(f"Failed to parse RSS feed {url} with crawl4ai: {e}")
+            return []
+
+    def _parse_xml_content(self, content: str, url: str) -> List[Dict[str, Any]]:
+        """从XML内容解析条目"""
+        root = ET.fromstring(content)
+        namespaces = self._get_namespaces(content)
+
+        items = []
+        if root.tag.endswith('rss'):
+            channel = root.find('channel')
+            if channel is not None:
+                for item in channel.findall('item'):
+                    parsed_item = self._parse_rss_item(item, namespaces, url)
                     if parsed_item:
                         items.append(parsed_item)
-            
-            logger.info(f"成功解析 {url}: {len(items)} 条记录")
-            return items
-            
-        except Exception as e:
-            logger.error(f"解析RSS源失败 {url}: {e}")
-            return []
-    
-    def _parse_rss_item(self, item: ET.Element) -> Optional[Dict[str, Any]]:
+        elif root.tag.endswith('feed'):
+            for entry in root.findall('atom:entry', namespaces):
+                parsed_item = self._parse_atom_item(entry, namespaces)
+                if parsed_item:
+                    items.append(parsed_item)
+
+        logger.info(f"Successfully parsed {url}: {len(items)} items")
+        return items
+
+    def _get_namespaces(self, xml_content: str) -> Dict[str, str]:
+        """从XML内容中提取命名空间"""
+        namespaces = dict([
+            node for _, node in ET.iterparse(
+                io.StringIO(xml_content), events=['start-ns']
+            )
+        ])
+        if 'atom' not in namespaces:
+            namespaces['atom'] = 'http://www.w3.org/2005/Atom'
+        if 'dc' not in namespaces:
+            namespaces['dc'] = 'http://purl.org/dc/elements/1.1/'
+        return namespaces
+
+    def _parse_rss_item(self, item: ET.Element, namespaces: Dict[str, str], url: str) -> Optional[Dict[str, Any]]:
         """解析RSS条目"""
         try:
             data = {}
+            data['title'] = self._get_element_text(item, 'title', namespaces)
+            data['link'] = self._get_element_text(item, 'link', namespaces)
+            data['guid'] = self._get_element_text(item, 'guid', namespaces, data['link'])
             
-            # 标题
-            title_elem = item.find('title')
-            data['title'] = html.unescape(title_elem.text.strip()) if title_elem is not None and title_elem.text else "No Title"
+            description_html = self._get_element_text(item, 'description', namespaces)
+            data['summary'] = self._clean_html(description_html)
+            data['image_url'] = self._extract_image_from_html(description_html)
+
+            data['published_at'] = self._parse_date(self._get_element_text(item, 'pubDate', namespaces))
             
-            # 链接
-            link_elem = item.find('link')
-            if link_elem is not None:
-                if link_elem.text:
-                    data['link'] = link_elem.text.strip()
-                else:
-                    # 处理属性形式的link
-                    data['link'] = link_elem.get('href', '')
-            else:
-                data['link'] = ""
-            
-            # GUID
-            guid_elem = item.find('guid')
-            if guid_elem is not None and guid_elem.text:
-                data['guid'] = guid_elem.text.strip()
-            else:
-                # 如果没有guid，使用link作为guid
-                data['guid'] = data['link']
-            
-            # 描述/摘要
-            desc_elem = item.find('description')
-            if desc_elem is not None and desc_elem.text:
-                # 清理HTML标签
-                summary = self._clean_html(desc_elem.text.strip())
-                data['summary'] = summary[:1000]  # 限制长度
-            else:
-                data['summary'] = ""
-            
-            # 发布日期
-            pub_date_elem = item.find('pubDate')
-            if pub_date_elem is not None and pub_date_elem.text:
-                published_at = self._parse_date(pub_date_elem.text.strip())
-                data['published_at'] = published_at
-            else:
-                data['published_at'] = datetime.now()
-            
-            # 作者
-            author_elem = item.find('author')
-            if author_elem is not None and author_elem.text:
-                data['author'] = html.unescape(author_elem.text.strip())
-            else:
-                creator_elem = item.find('dc:creator')
-                if creator_elem is not None and creator_elem.text:
-                    data['author'] = html.unescape(creator_elem.text.strip())
-                else:
-                    data['author'] = "Unknown"
-            
-            # 分类
-            category_elem = item.find('category')
-            if category_elem is not None and category_elem.text:
-                data['category'] = html.unescape(category_elem.text.strip())
-            else:
-                data['category'] = ""
+            author = self._get_element_text(item, 'dc:creator', namespaces)
+            if author:
+                data['author'] = author
+
+            if 'techcrunch' not in url:
+                categories = [self._clean_html(c.text) for c in item.findall('category')]
+                data['category'] = ', '.join(categories) if categories else ""
             
             return data
-            
         except Exception as e:
-            logger.error(f"解析RSS条目失败: {e}")
+            logger.error(f"Failed to parse RSS item: {e}")
             return None
-    
+
     def _parse_atom_item(self, entry: ET.Element, namespaces: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """解析Atom条目"""
         try:
             data = {}
+            data['title'] = self._get_element_text(entry, 'atom:title', namespaces)
+            data['link'] = entry.find('atom:link', namespaces).get('href') if entry.find('atom:link', namespaces) is not None else ''
+            data['guid'] = self._get_element_text(entry, 'atom:id', namespaces, data['link'])
+
+            summary_html = self._get_element_text(entry, 'atom:summary', namespaces)
+            content_html = self._get_element_text(entry, 'atom:content', namespaces)
             
-            # 标题
-            title_elem = entry.find('atom:title', namespaces)
-            data['title'] = html.unescape(title_elem.text.strip()) if title_elem is not None and title_elem.text else "No Title"
-            
-            # 链接
-            link_elem = entry.find('atom:link', namespaces)
-            if link_elem is not None:
-                href = link_elem.get('href', '')
-                data['link'] = href
-            else:
-                data['link'] = ""
-            
-            # GUID (使用link作为guid)
-            data['guid'] = data['link']
-            
-            # 摘要
-            summary_elem = entry.find('atom:summary', namespaces)
-            if summary_elem is not None and summary_elem.text:
-                summary = self._clean_html(summary_elem.text.strip())
-                data['summary'] = summary[:1000]
-            else:
-                data['summary'] = ""
-            
-            # 发布日期
-            published_elem = entry.find('atom:published', namespaces)
-            if published_elem is not None and published_elem.text:
-                published_at = self._parse_date(published_elem.text.strip())
-                data['published_at'] = published_at
-            else:
-                updated_elem = entry.find('atom:updated', namespaces)
-                if updated_elem is not None and updated_elem.text:
-                    published_at = self._parse_date(updated_elem.text.strip())
-                    data['published_at'] = published_at
-                else:
-                    data['published_at'] = datetime.now()
-            
-            # 作者
+            data['summary'] = self._clean_html(summary_html or content_html)
+            data['image_url'] = self._extract_image_from_html(content_html or summary_html)
+
+            data['published_at'] = self._parse_date(self._get_element_text(entry, 'atom:published', namespaces))
+            data['updated_at'] = self._parse_date(self._get_element_text(entry, 'atom:updated', namespaces))
+
             author_elem = entry.find('atom:author', namespaces)
             if author_elem is not None:
-                name_elem = author_elem.find('atom:name', namespaces)
-                if name_elem is not None and name_elem.text:
-                    data['author'] = html.unescape(name_elem.text.strip())
-                else:
-                    data['author'] = "Unknown"
-            else:
-                data['author'] = "Unknown"
+                author = self._get_element_text(author_elem, 'atom:name', namespaces)
+                if author:
+                    data['author'] = author
             
-            # 分类（Atom中可能为category元素）
-            category_elem = entry.find('atom:category', namespaces)
-            if category_elem is not None:
-                term = category_elem.get('term', '')
-                data['category'] = html.unescape(term) if term else ""
-            else:
-                data['category'] = ""
-            
+            categories = [c.get('term') for c in entry.findall('atom:category', namespaces)]
+            if categories:
+                data['category'] = ', '.join(filter(None, categories))
+
             return data
-            
         except Exception as e:
-            logger.error(f"解析Atom条目失败: {e}")
+            logger.error(f"Failed to parse Atom item: {e}")
             return None
-    
+
+    def _get_element_text(self, element: ET.Element, tag: str, namespaces: Dict[str, str], default: str = "") -> str:
+        """安全地获取元素的文本内容"""
+        elem = element.find(tag, namespaces)
+        if elem is not None and elem.text:
+            return html.unescape(elem.text.strip())
+        return default
+
+    def _extract_image_from_html(self, html_content: str) -> Optional[str]:
+        """从HTML内容中提取第一张图片的URL"""
+        if not html_content:
+            return None
+        match = re.search(r'<img[^>]+src="([^"]+)"', html_content)
+        if match:
+            return match.group(1)
+        return None
+
     def _clean_html(self, html_text: str) -> str:
         """清理HTML标签"""
         if not html_text:
             return ""
         
-        # 移除HTML标签
-        clean_text = re.sub(r'<[^>]*>', '', html_text)
-        
-        # 解码HTML实体
-        clean_text = html.unescape(clean_text)
-        
+        # 使用html2text进行更可靠的清理
+        try:
+            import html2text
+            h = html2text.HTML2Text()
+            h.ignore_links = True
+            h.ignore_images = True
+            clean_text = h.handle(html_text)
+        except ImportError:
+            # Fallback to regex if html2text is not available
+            clean_text = re.sub(r'<[^>]*>', '', html_text)
+            clean_text = html.unescape(clean_text)
+
         # 移除多余的空白
         clean_text = re.sub(r'\s+', ' ', clean_text).strip()
         
         return clean_text
-    
-    def _parse_date(self, date_str: str) -> datetime:
+
+    def _parse_date(self, date_str: str) -> Optional[datetime]:
         """解析日期字符串"""
+        if not date_str:
+            return None
         try:
             from dateutil import parser
             return parser.parse(date_str)
         except Exception:
-            logger.warning(f"无法解析日期: {date_str}")
-            return datetime.now()
+            logger.warning(f"Could not parse date: {date_str}")
+            return None
     
-    def extract_visit_url(self, link: str, feed_type: str) -> str:
+    def extract_visit_url(self, guid: str, feed_type: str) -> str:
         """提取特殊URL（如BetaList的visit_url）"""
-        if feed_type == 'betalist' and link:
+        if feed_type == 'betalist' and guid:
             # BetaList的特殊处理：在链接后添加/visit
-            if not link.endswith('/'):
-                link += '/'
-            return link + 'visit'
-        return link
+            if not guid.endswith('/'):
+                guid += '/'
+            return guid + 'visit'
+        return guid
 
 # 全局解析器实例
 rss_parser = RSSParser()

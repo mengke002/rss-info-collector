@@ -13,17 +13,21 @@ class Config:
         self.config = configparser.ConfigParser()
         self.config.read(config_path, encoding='utf-8')
     
-    def get_database_config(self) -> Dict[str, str]:
+    def get_database_config(self) -> Dict[str, Any]:
         """获取数据库配置"""
-        return {
+        db_config = {
             'host': self.config.get('database', 'host'),
             'port': int(self.config.get('database', 'port')),
             'user': self.config.get('database', 'user'),
             'password': self.config.get('database', 'password'),
             'database': self.config.get('database', 'database'),
-            'ssl_mode': self.config.get('database', 'ssl_mode'),
             'charset': 'utf8mb4'
         }
+
+        if self.config.has_option('database', 'ssl_mode') and self.config.get('database', 'ssl_mode').upper() == 'REQUIRED':
+            db_config['ssl'] = {'mode': 'REQUIRED'}
+
+        return db_config
     
     def get_crawler_config(self) -> Dict[str, Any]:
         """获取爬虫配置"""
@@ -86,6 +90,11 @@ class Config:
             'indiehackers_saas': {
                 'rss_url': self.config.get('feeds', 'indiehackers_saas_rss'),
                 'interval': int(self.config.get('feeds', 'indiehackers_saas_interval'))
+            },
+            'techcrunch': {
+                'rss_url': self.config.get('feeds', 'techcrunch_rss'),
+                'interval': int(self.config.get('feeds', 'techcrunch_interval')),
+                'strategy': 'crawl4ai'
             }
         }
         
@@ -100,10 +109,6 @@ class Config:
             },
             'ycombinator': {
                 'url': self.config.get('feeds', 'ycombinator_rss'),
-                'strategy': 'crawl4ai'  # 需要crawl4ai
-            },
-            'techcrunch': {
-                'url': self.config.get('feeds', 'techcrunch_rss'),
                 'strategy': 'crawl4ai'  # 需要crawl4ai
             }
         }

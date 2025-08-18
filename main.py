@@ -9,7 +9,9 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 
-from src.scheduler import scheduler
+from src.scheduler import RSSScheduler
+from src.database import DatabaseManager
+from src.config import config
 
 
 def get_beijing_time():
@@ -28,6 +30,10 @@ def main():
                        help='数据保留天数（仅用于cleanup任务）')
     parser.add_argument('--output', choices=['json', 'text'], default='text',
                        help='输出格式')
+    parser.add_argument('--recreate-db', action='store_true',
+                       help='删除并重新创建所有RSS表')
+    parser.add_argument('--feed', type=str,
+                       help='只爬取指定的RSS源')
     
     args = parser.parse_args()
     
@@ -35,16 +41,25 @@ def main():
     print(f"执行时间: {get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"执行任务: {args.task}")
     print("-" * 50)
+
+    db_manager = DatabaseManager(config)
+    scheduler = RSSScheduler(config, db_manager)
+
+    if args.recreate_db:
+        print("正在删除并重新创建数据库表...")
+        db_manager.drop_all_rss_tables()
+        db_manager.init_database()
+        print("数据库表已重新创建。")
     
     # 执行对应任务
     if args.task == 'crawl':
-        result = scheduler.run_crawl_task()
+        result = scheduler.run_crawl_task(args.feed)
     elif args.task == 'cleanup':
         result = scheduler.run_cleanup_task(args.retention_days)
     elif args.task == 'stats':
         result = scheduler.run_stats_task()
     elif args.task == 'full':
-        result = run_full_maintenance()
+        result = run_full_maintenance(scheduler)
     elif args.task == 'daemon':
         print("启动RSS守护进程...")
         try:
@@ -73,7 +88,7 @@ def main():
             sys.exit(1)
 
 
-def run_full_maintenance():
+def run_full_maintenance(scheduler):
     """执行完整维护任务"""
     results = {
         'success': True,

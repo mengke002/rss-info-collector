@@ -14,9 +14,11 @@ logger = logging.getLogger(__name__)
 class DatabaseManager:
     """数据库管理类"""
     
-    def __init__(self):
+    def __init__(self, config):
         """初始化数据库连接"""
+        print("Initializing DatabaseManager...")
         self.db_config = config.get_database_config()
+        self.config = config
         self.init_database()
     
     @contextmanager
@@ -51,6 +53,19 @@ class DatabaseManager:
                         else:
                             raise e
     
+    def drop_all_rss_tables(self):
+        """删除所有RSS相关的表"""
+        table_names = self.get_table_schemas().keys()
+        with self.get_connection() as conn:
+            with conn.cursor() as cursor:
+                for table_name in table_names:
+                    try:
+                        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+                        conn.commit()
+                        logger.info(f"表 {table_name} 删除成功")
+                    except Exception as e:
+                        logger.error(f"删除表 {table_name} 失败: {e}")
+
     def get_table_schemas(self) -> Dict[str, str]:
         """获取所有表的创建SQL"""
         return {
@@ -60,150 +75,94 @@ class DatabaseManager:
                     title VARCHAR(255) NOT NULL,
                     link VARCHAR(512) NOT NULL,
                     visit_url VARCHAR(512),
-                    guid VARCHAR(255) UNIQUE,
+                    guid VARCHAR(255) UNIQUE NOT NULL,
+                    author VARCHAR(255),
+                    summary TEXT,
+                    image_url VARCHAR(512),
                     published_at DATETIME,
+                    updated_at DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
+                    INDEX idx_link (link)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             
+            'rss_producthunt': """
+                CREATE TABLE IF NOT EXISTS rss_producthunt (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    link VARCHAR(512) UNIQUE NOT NULL,
+                    author VARCHAR(255),
+                    summary TEXT,
+                    image_url VARCHAR(512),
+                    guid VARCHAR(512) UNIQUE NOT NULL,
+                    category VARCHAR(255),
+                    published_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_published (published_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+
+            'rss_ycombinator': """
+                CREATE TABLE IF NOT EXISTS rss_ycombinator (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    link VARCHAR(512) UNIQUE NOT NULL,
+                    summary TEXT,
+                    guid VARCHAR(512) UNIQUE NOT NULL,
+                    published_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_published (published_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+
+            'rss_techcrunch': """
+                CREATE TABLE IF NOT EXISTS rss_techcrunch (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    link VARCHAR(512) UNIQUE NOT NULL,
+                    summary TEXT,
+                    image_url VARCHAR(512),
+                    guid VARCHAR(512) UNIQUE NOT NULL,
+                    published_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_published (published_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+
             'rss_theverge': """
                 CREATE TABLE IF NOT EXISTS rss_theverge (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(2000),
-                    guid VARCHAR(255) UNIQUE,
+                    link VARCHAR(512) UNIQUE NOT NULL,
+                    author VARCHAR(255),
+                    summary TEXT,
+                    image_url VARCHAR(512),
+                    guid VARCHAR(255) UNIQUE NOT NULL,
+                    category VARCHAR(255),
                     published_at DATETIME,
+                    updated_at DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
+                    INDEX idx_published (published_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             
-            'rss_indiehackers_alltime': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_alltime (
+            **{f'rss_indiehackers_{feed}': f"""
+                CREATE TABLE IF NOT EXISTS rss_indiehackers_{feed} (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     title VARCHAR(255) NOT NULL,
                     link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
+                    summary TEXT,
+                    author VARCHAR(255),
+                    category VARCHAR(100),
+                    guid VARCHAR(512) UNIQUE NOT NULL,
                     published_at DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    updated_at DATETIME,
                     INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
+                    INDEX idx_link (link)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            
-            'rss_indiehackers_month': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_month (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            
-            'rss_indiehackers_week': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_week (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            
-            'rss_indiehackers_today': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_today (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            
-            'rss_indiehackers_growth': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_growth (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            
-            'rss_indiehackers_developers': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_developers (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            
-            'rss_indiehackers_saas': """
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_saas (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) NOT NULL,
-                    summary VARCHAR(1000),
-                    category VARCHAR(50),
-                    guid VARCHAR(255) UNIQUE,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at),
-                    INDEX idx_link (link),
-                    INDEX idx_created (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
+            """ for feed in ['alltime', 'month', 'week', 'today', 'growth', 'developers', 'saas']}
         }
     
     def insert_rss_item(self, table_name: str, item_data: Dict[str, Any]) -> bool:
@@ -222,6 +181,8 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
+                    # The line below is for debugging and will be removed later.
+                    print(f"DEBUG: Inserting into {table_name}: {item_data}")
                     cursor.execute(sql, list(item_data.values()))
                     conn.commit()
                     return cursor.rowcount > 0
@@ -285,6 +246,3 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"获取统计信息失败: {e}")
             return {'total_count': 0, 'today_count': 0, 'latest_time': None}
-
-# 全局数据库实例
-db_manager = DatabaseManager()
