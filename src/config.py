@@ -95,23 +95,15 @@ class Config:
                 'rss_url': self.config.get('feeds', 'techcrunch_rss'),
                 'interval': int(self.config.get('feeds', 'techcrunch_interval')),
                 'strategy': 'crawl4ai'
+            },
+            'ycombinator': {
+                'rss_url': self.config.get('feeds', 'ycombinator_rss'),
+                'interval': int(self.config.get('feeds', 'ycombinator_interval')),
+                'strategy': 'crawl4ai' # 使用crawl4ai获取RSS，并修复XML结构
             }
         }
         
         return working_feeds
-    
-    def get_failed_feeds(self) -> Dict[str, Dict[str, str]]:
-        """获取失败的RSS源配置（需要特殊处理）"""
-        return {
-            'producthunt': {
-                'url': self.config.get('feeds', 'producthunt_rss'),
-                'strategy': 'playwright'  # 需要playwright
-            },
-            'ycombinator': {
-                'url': self.config.get('feeds', 'ycombinator_rss'),
-                'strategy': 'crawl4ai'  # 需要crawl4ai
-            }
-        }
 
 # 全局配置实例
 config = Config()

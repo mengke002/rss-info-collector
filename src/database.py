@@ -44,14 +44,23 @@ class DatabaseManager:
             with conn.cursor() as cursor:
                 for table_name, schema in table_schemas.items():
                     try:
-                        cursor.execute(schema)
-                        conn.commit()
-                        logger.info(f"表 {table_name} 创建成功")
-                    except pymysql.err.ProgrammingError as e:
-                        if "already exists" in str(e):
-                            logger.debug(f"表 {table_name} 已存在")
+                        # 先检查表是否存在
+                        cursor.execute(f"""
+                            SELECT COUNT(*)
+                            FROM information_schema.tables
+                            WHERE table_schema = %s AND table_name = %s
+                        """, (self.db_config['database'], table_name))
+                        
+                        if cursor.fetchone()[0] == 0:
+                            cursor.execute(schema)
+                            conn.commit()
+                            logger.info(f"表 {table_name} 创建成功")
                         else:
-                            raise e
+                            logger.debug(f"表 {table_name} 已存在")
+                    except Exception as e:
+                        logger.error(f"初始化表 {table_name} 失败: {e}")
+                        conn.rollback()
+                        raise
     
     def drop_all_rss_tables(self):
         """删除所有RSS相关的表"""
@@ -87,32 +96,19 @@ class DatabaseManager:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             
-            'rss_producthunt': """
-                CREATE TABLE IF NOT EXISTS rss_producthunt (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) UNIQUE NOT NULL,
-                    author VARCHAR(255),
-                    summary TEXT,
-                    image_url VARCHAR(512),
-                    guid VARCHAR(512) UNIQUE NOT NULL,
-                    category VARCHAR(255),
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-
             'rss_ycombinator': """
                 CREATE TABLE IF NOT EXISTS rss_ycombinator (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) UNIQUE NOT NULL,
-                    summary TEXT,
+                    link VARCHAR(512) NOT NULL,
                     guid VARCHAR(512) UNIQUE NOT NULL,
+                    full_content MEDIUMTEXT,
+                    content_fetched_at DATETIME,
                     published_at DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at)
+                    updated_at DATETIME,
+                    INDEX idx_published (published_at),
+                    INDEX idx_link (link(255))
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
 
@@ -147,8 +143,8 @@ class DatabaseManager:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             
-            **{f'rss_indiehackers_{feed}': f"""
-                CREATE TABLE IF NOT EXISTS rss_indiehackers_{feed} (
+            'rss_indiehackers': """
+                CREATE TABLE IF NOT EXISTS rss_indiehackers (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     title VARCHAR(255) NOT NULL,
                     link VARCHAR(512) NOT NULL,
@@ -156,24 +152,37 @@ class DatabaseManager:
                     author VARCHAR(255),
                     category VARCHAR(100),
                     guid VARCHAR(512) UNIQUE NOT NULL,
+                    image_url VARCHAR(512),
+                    full_content TEXT,
+                    content_fetched_at DATETIME,
                     published_at DATETIME,
+                    feed_type VARCHAR(50) NOT NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME,
                     INDEX idx_published (published_at),
-                    INDEX idx_link (link)
+                    INDEX idx_link (link),
+                    INDEX idx_content_fetched (content_fetched_at),
+                    INDEX idx_feed_type (feed_type)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """ for feed in ['alltime', 'month', 'week', 'today', 'growth', 'developers', 'saas']}
+            """
         }
     
     def insert_rss_item(self, table_name: str, item_data: Dict[str, Any]) -> bool:
-        """插入RSS条目"""
+        """插入RSS条目（单条插入，兼容旧代码）"""
+        return self.insert_rss_items_batch(table_name, [item_data])
+    
+    def insert_rss_items_batch(self, table_name: str, items_data: List[Dict[str, Any]]) -> int:
+        """批量插入RSS条目"""
+        if not items_data:
+            return 0
+        
         # 构建插入SQL
-        columns = ', '.join(item_data.keys())
-        placeholders = ', '.join(['%s'] * len(item_data))
-        update_clause = ', '.join([f"{k} = VALUES({k})" for k in item_data.keys() if k != 'guid'])
+        columns = ', '.join(items_data[0].keys())
+        placeholders = ', '.join(['%s'] * len(items_data[0]))
+        update_clause = ', '.join([f"{k} = VALUES({k})" for k in items_data[0].keys() if k != 'guid'])
         
         sql = f"""
-            INSERT INTO {table_name} ({columns}) 
+            INSERT INTO {table_name} ({columns})
             VALUES ({placeholders})
             ON DUPLICATE KEY UPDATE {update_clause}
         """
@@ -181,14 +190,16 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
-                    # The line below is for debugging and will be removed later.
-                    print(f"DEBUG: Inserting into {table_name}: {item_data}")
-                    cursor.execute(sql, list(item_data.values()))
+                    # 批量插入
+                    values_list = [list(item.values()) for item in items_data]
+                    cursor.executemany(sql, values_list)
                     conn.commit()
-                    return cursor.rowcount > 0
+                    inserted_count = cursor.rowcount
+                    logger.info(f"批量插入 {table_name}: {inserted_count} 条记录")
+                    return inserted_count
         except Exception as e:
-            logger.error(f"插入数据失败: {e}")
-            return False
+            logger.error(f"批量插入数据失败: {e}")
+            return 0
     
     def get_existing_guids(self, table_name: str) -> set:
         """获取已存在的GUID集合"""

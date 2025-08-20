@@ -9,9 +9,9 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 
-from src.scheduler import RSSScheduler
 from src.database import DatabaseManager
 from src.config import config
+from src.tasks import run_crawl_task, run_cleanup_task, run_stats_task
 
 
 def get_beijing_time():
@@ -24,7 +24,7 @@ def get_beijing_time():
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='RSS数据采集系统')
-    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'full', 'daemon'], 
+    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'full'],
                        default='crawl', help='要执行的任务类型')
     parser.add_argument('--retention-days', type=int, 
                        help='数据保留天数（仅用于cleanup任务）')
@@ -43,8 +43,6 @@ def main():
     print("-" * 50)
 
     db_manager = DatabaseManager(config)
-    scheduler = RSSScheduler(config, db_manager)
-
     if args.recreate_db:
         print("正在删除并重新创建数据库表...")
         db_manager.drop_all_rss_tables()
@@ -53,42 +51,33 @@ def main():
     
     # 执行对应任务
     if args.task == 'crawl':
-        result = scheduler.run_crawl_task(args.feed)
+        result = run_crawl_task(db_manager, args.feed)
     elif args.task == 'cleanup':
-        result = scheduler.run_cleanup_task(args.retention_days)
+        result = run_cleanup_task(db_manager, args.retention_days)
     elif args.task == 'stats':
-        result = scheduler.run_stats_task()
+        result = run_stats_task(db_manager)
     elif args.task == 'full':
-        result = run_full_maintenance(scheduler)
-    elif args.task == 'daemon':
-        print("启动RSS守护进程...")
-        try:
-            scheduler.start_scheduler()
-        except KeyboardInterrupt:
-            print("\n收到中断信号，正在停止...")
-            scheduler.stop_scheduler()
-            return
+        result = run_full_maintenance(db_manager)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)
     
     # 输出结果
-    if args.task != 'daemon':
-        if args.output == 'json':
-            print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
-        else:
-            print_result(result, args.task)
-        
-        # 根据结果设置退出码
-        if result.get('success', False):
-            print("\n✅ 任务执行成功")
-            sys.exit(0)
-        else:
-            print(f"\n❌ 任务执行失败: {result.get('error', '未知错误')}")
-            sys.exit(1)
+    if args.output == 'json':
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    else:
+        print_result(result, args.task)
+    
+    # 根据结果设置退出码
+    if result.get('success', False):
+        print("\n✅ 任务执行成功")
+        sys.exit(0)
+    else:
+        print(f"\n❌ 任务执行失败: {result.get('error', '未知错误')}")
+        sys.exit(1)
 
 
-def run_full_maintenance(scheduler):
+def run_full_maintenance(db_manager):
     """执行完整维护任务"""
     results = {
         'success': True,
@@ -99,17 +88,17 @@ def run_full_maintenance(scheduler):
     
     # 1. 爬取任务
     print("1. 执行爬取任务...")
-    crawl_result = scheduler.run_crawl_task()
+    crawl_result = run_crawl_task(db_manager)
     results['results']['crawl'] = crawl_result
     
     # 2. 清理任务
     print("2. 执行清理任务...")
-    cleanup_result = scheduler.run_cleanup_task()
+    cleanup_result = run_cleanup_task(db_manager)
     results['results']['cleanup'] = cleanup_result
     
     # 3. 统计任务
     print("3. 执行统计任务...")
-    stats_result = scheduler.run_stats_task()
+    stats_result = run_stats_task(db_manager)
     results['results']['stats'] = stats_result
     
     # 检查所有任务是否成功
