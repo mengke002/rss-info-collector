@@ -111,9 +111,7 @@ class ContentEnhancer:
             if feed_type == 'indiehackers':
                 nl = enhancer._normalize_indiehackers_url(link)
                 fetch_link = nl or link
-                norm_links.append(fetch_link)
-            else:
-                norm_links.append(link)
+            norm_links.append(fetch_link)
             fetch_tasks.append(enhancer.fetch_full_content(fetch_link))
             items_refs.append(item)
         if fetch_tasks:
@@ -121,7 +119,7 @@ class ContentEnhancer:
             contents = await asyncio.gather(*fetch_tasks, return_exceptions=True)
             for (item, fetch_link, content) in zip(items_refs, norm_links, contents):
                 e = item.copy()
-                if feed_type == 'indiehackers':
+                if feed_type in ('indiehackers', 'techcrunch'):
                     e['link'] = fetch_link
                 if isinstance(content, Exception):
                     e['full_content'] = f"无法获取完整内容，请访问原链接: {e.get('link')}"
@@ -142,7 +140,7 @@ class ContentEnhancer:
 
     async def enhance_items(self, items: list, feed_type: str, batch_size: int = 5, batch_delay: float = 2.0) -> list:
         enhanced_items = []
-        if feed_type not in ('ycombinator', 'indiehackers'):
+        if feed_type not in ('ycombinator', 'indiehackers', 'techcrunch'):
             for item in items:
                 e = item.copy()
                 e['full_content'] = item.get('summary', '')
