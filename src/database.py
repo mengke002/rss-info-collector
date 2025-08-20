@@ -126,20 +126,6 @@ class DatabaseManager:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
 
-            'rss_techcrunch_ai': """
-                CREATE TABLE IF NOT EXISTS rss_techcrunch_ai (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(512) UNIQUE NOT NULL,
-                    full_content TEXT,
-                    image_url VARCHAR(512),
-                    guid VARCHAR(512) UNIQUE NOT NULL,
-                    published_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-
             'rss_theverge': """
                 CREATE TABLE IF NOT EXISTS rss_theverge (
                     id INT AUTO_INCREMENT PRIMARY KEY,
