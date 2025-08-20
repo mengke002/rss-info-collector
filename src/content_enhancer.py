@@ -3,6 +3,7 @@
 """
 import asyncio
 import re
+import random
 from datetime import datetime
 from typing import Optional, Dict, Any
 from crawl4ai import AsyncWebCrawler
@@ -26,16 +27,22 @@ class ContentEnhancer:
         if self.crawler:
             await self.crawler.__aexit__(exc_type, exc_val, exc_tb)
     
-    async def fetch_full_content(self, url: str, max_retries: int = 2) -> Optional[str]:
+    async def fetch_full_content(self, url: str, feed_type: str, max_retries: int = 2) -> Optional[str]:
         """
         使用 crawl4ai 获取给定URL的完整Markdown内容，支持重试。
+        针对特定feed类型应用不同的策略。
         """
+        # 针对 indiehackers 使用更强的重试策略
+        if feed_type == 'indiehackers':
+            max_retries = 4
+
         for attempt in range(max_retries + 1):
             try:
                 if attempt > 0:
-                    logger.info(f"Retrying ({attempt}/{max_retries}) for: {url}")
-                    # 重试前等待一段时间
-                    await asyncio.sleep(2 * attempt)
+                    # 指数退避 + 随机抖动
+                    delay = (2 ** (attempt - 1)) + random.uniform(0.5, 1.5)
+                    logger.info(f"Retrying ({attempt}/{max_retries}) for: {url} after {delay:.2f}s delay")
+                    await asyncio.sleep(delay)
                 else:
                     logger.info(f"Fetching full content for: {url}")
                 
@@ -44,18 +51,29 @@ class ContentEnhancer:
                 if result.success and result.markdown:
                     logger.info(f"Successfully fetched content for: {url}")
                     return result.markdown
+                
+                # 检查是否是速率限制错误
+                if not result.success and "1015" in getattr(result, 'error', ''):
+                    logger.warning(f"Rate limit error detected for {url}. Retrying...")
+                    # 如果是最后一次尝试，则返回错误信息
+                    if attempt == max_retries:
+                        return f"# Error 1015\nRate limited: {url}"
+                    continue
+
                 elif result.success:
                     logger.warning(f"Content fetch succeeded but no markdown was returned for: {url}")
                     if attempt == max_retries:
                         return None
                 else:
-                    logger.error(f"Failed to fetch content for {url}: {getattr(result, 'error', 'Unknown error')}")
+                    error_msg = getattr(result, 'error', 'Unknown error')
+                    logger.error(f"Failed to fetch content for {url}: {error_msg}")
                     if attempt == max_retries:
-                        return None
+                        # 返回错误信息以便于调试
+                        return f"# Fetch Error\nFailed to fetch {url}: {error_msg}"
             except Exception as e:
                 logger.error(f"Exception during content fetching for {url} (attempt {attempt + 1}): {e}")
                 if attempt == max_retries:
-                    return None
+                    return f"# Fetch Exception\nException for {url}: {e}"
         
         return None
     
@@ -147,13 +165,16 @@ class ContentEnhancer:
                 e['content_fetched_at'] = None
                 batch_results.append(e)
                 continue
+            
             fetch_link = link
             if feed_type == 'indiehackers':
                 nl = enhancer._normalize_indiehackers_url(link)
                 fetch_link = nl or link
+            
             norm_links.append(fetch_link)
-            fetch_tasks.append(enhancer.fetch_full_content(fetch_link))
+            fetch_tasks.append(enhancer.fetch_full_content(fetch_link, feed_type=feed_type))
             items_refs.append(item)
+
         if fetch_tasks:
             logger.info(f"处理批次: {len(fetch_tasks)} 个链接...")
             contents = await asyncio.gather(*fetch_tasks, return_exceptions=True)
@@ -161,23 +182,33 @@ class ContentEnhancer:
                 e = item.copy()
                 if feed_type in ('indiehackers', 'techcrunch'):
                     e['link'] = fetch_link
+
                 if isinstance(content, Exception):
-                    e['full_content'] = f"无法获取完整内容，请访问原链接: {e.get('link')}"
+                    e['full_content'] = f"无法获取完整内容，请访问原链接: {item.get('link')}"
                     e['content_fetched_at'] = None
-                    logger.warning(f"内容抓取失败: {e['title'][:50]}... - {str(content)}")
+                    logger.warning(f"内容抓取失败: {item.get('title', 'N/A')[:50]}... - {str(content)}")
                 elif content:
-                    if feed_type == 'indiehackers':
+                    # 检查是否是抓取失败后返回的错误信息
+                    is_error_content = content.startswith(('# Error', '# Fetch'))
+                    
+                    if feed_type == 'indiehackers' and not is_error_content:
                         content = enhancer._extract_main_content(content)
-                    elif feed_type == 'techcrunch':
+                    elif feed_type == 'techcrunch' and not is_error_content:
                         content = enhancer._clean_techcrunch_content(content)
+                    
                     e['full_content'] = content
                     e['content_fetched_at'] = datetime.now()
-                    logger.info(f"内容抓取成功: {e['title'][:50]}...")
+                    
+                    if not is_error_content:
+                        logger.info(f"内容抓取成功: {item.get('title', 'N/A')[:50]}...")
+                    else:
+                        logger.warning(f"内容抓取失败(有错误信息): {item.get('title', 'N/A')[:50]}...")
                 else:
-                    e['full_content'] = f"无法获取完整内容，请访问原链接: {e.get('link')}"
+                    e['full_content'] = f"无法获取完整内容，请访问原链接: {item.get('link')}"
                     e['content_fetched_at'] = None
-                    logger.warning(f"内容为空: {e['title'][:50]}...")
+                    logger.warning(f"内容为空: {item.get('title', 'N/A')[:50]}...")
                 batch_results.append(e)
+                
         return batch_results
 
     async def enhance_items(self, items: list, feed_type: str, batch_size: int = 5, batch_delay: float = 2.0) -> list:
@@ -189,14 +220,21 @@ class ContentEnhancer:
                 e['content_fetched_at'] = datetime.now()
                 enhanced_items.append(e)
             return enhanced_items
+
+        # 为 indiehackers 使用更保守的批处理策略
+        if feed_type == 'indiehackers':
+            batch_size = 3  # 减小批次大小
+            batch_delay = 5.0  # 增加批次间延迟
+
         async with self as enhancer:
             total_items = len(items)
-            logger.info(f"开始分批爬取 {total_items} 个项目，每批 {batch_size} 个，批次间延迟 {batch_delay} 秒")
+            logger.info(f"开始为 {feed_type} 分批爬取 {total_items} 个项目，每批 {batch_size} 个，批次间延迟 {batch_delay} 秒")
             for i in range(0, total_items, batch_size):
                 batch = items[i:i + batch_size]
                 batch_results = await self._fetch_batch(batch, enhancer, feed_type)
                 enhanced_items.extend(batch_results)
                 if i + batch_size < total_items:
+                    logger.info(f"批次完成，等待 {batch_delay} 秒...")
                     await asyncio.sleep(batch_delay)
         logger.info(f"所有批次处理完成，共处理 {len(enhanced_items)} 个项目")
         return enhanced_items
