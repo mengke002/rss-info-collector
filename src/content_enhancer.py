@@ -93,6 +93,46 @@ class ContentEnhancer:
         text = re.sub(r'(?m)^\s*Share\s*$', '', text)
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
+
+    def _clean_techcrunch_content(self, content: str) -> str:
+        """
+        清洗TechCrunch文章内容的冗余信息
+        """
+        if not content:
+            return ""
+        
+        text = str(content)
+
+        # 1. 定位文章主体内容
+        match = re.search(r'(?m)^#\s+.+$', text)
+        if not match:
+            return text.strip()
+        
+        text = text[match.start():]
+
+        # 2. 找到文章内容的结束点
+        end_patterns = [
+            r'\n_We’re always looking to evolve, and by providing some insight.*',
+            r'\nTopics\n\n',
+            r'\n## Most Popular',
+            r'\n!\[Event Logo\]',
+            r'\nLoading the next article'
+        ]
+        
+        cut_off_point = len(text)
+        for pattern in end_patterns:
+            end_match = re.search(pattern, text, re.DOTALL)
+            if end_match:
+                cut_off_point = min(cut_off_point, end_match.start())
+                
+        text = text[:cut_off_point]
+
+        # 3. 清理文章主体内部的残留噪声
+        text = re.sub(r'(?m)^\[ \]\(https?://(www\.)?(facebook|twitter|linkedin|reddit)\.com/.*\)\s*$\n?', '', text)
+        text = re.sub(r'(?m)^!\[.*?\]\(.*?\)\*\*Image Credits:.*$', '', text)
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        
+        return text
     
     async def _fetch_batch(self, items_batch: list, enhancer, feed_type: str) -> list:
         fetch_tasks = []
@@ -128,6 +168,8 @@ class ContentEnhancer:
                 elif content:
                     if feed_type == 'indiehackers':
                         content = enhancer._extract_main_content(content)
+                    elif feed_type == 'techcrunch':
+                        content = enhancer._clean_techcrunch_content(content)
                     e['full_content'] = content
                     e['content_fetched_at'] = datetime.now()
                     logger.info(f"内容抓取成功: {e['title'][:50]}...")

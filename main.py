@@ -134,10 +134,19 @@ def print_result(result: dict, task_type: str):
         print(f"✅ 统计信息")
         for feed_name, stats in result.get('stats', {}).items():
             print(f"   {feed_name}:")
-            print(f"     总记录数: {stats.get('total_count', 0)}")
-            print(f"     今日新增: {stats.get('today_count', 0)}")
-            if stats.get('latest_time'):
-                print(f"     最新时间: {stats['latest_time']}")
+            if feed_name == 'indiehackers_by_type':
+                # 特殊处理indiehackers_by_type的显示
+                if isinstance(stats, dict) and stats:
+                    for feed_type, count in stats.items():
+                        print(f"     {feed_type}: {count} 条")
+                else:
+                    print(f"     暂无数据")
+            else:
+                # 标准格式显示
+                print(f"     总记录数: {stats.get('total_count', 0)}")
+                print(f"     今日新增: {stats.get('today_count', 0)}")
+                if stats.get('latest_time'):
+                    print(f"     最新时间: {stats['latest_time']}")
     
     elif task_type == 'full':
         print(f"✅ 完整维护任务完成")
