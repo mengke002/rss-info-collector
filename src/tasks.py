@@ -18,7 +18,8 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
         'rss_indiehackers': ['title', 'link', 'summary', 'author', 'category', 'guid', 'image_url', 'full_content', 'content_fetched_at', 'published_at', 'feed_type', 'updated_at'],
         'rss_betalist': ['title', 'link', 'visit_url', 'guid', 'author', 'summary', 'image_url', 'published_at', 'updated_at'],
         'rss_theverge': ['title', 'link', 'author', 'summary', 'image_url', 'guid', 'category', 'published_at', 'updated_at'],
-        'rss_techcrunch': ['title', 'link', 'summary', 'image_url', 'guid', 'published_at', 'updated_at'],
+        'rss_techcrunch': ['title', 'link', 'summary', 'image_url', 'guid', 'published_at'],
+        'rss_techcrunch_ai': ['title', 'link', 'full_content', 'image_url', 'guid', 'published_at'],
     }
     if table_name not in table_columns:
         return items
@@ -65,6 +66,13 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
             'title': 255,
             'link': 512,
             'summary': 65000,
+            'image_url': 512,
+            'guid': 512
+        },
+        'rss_techcrunch_ai': {
+            'title': 255,
+            'link': 512,
+            'full_content': 65000,
             'image_url': 512,
             'guid': 512
         },
@@ -140,6 +148,9 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
             elif 'indiehackers' in feed_name and new_items:
                 logger.info(f"开始为 indiehackers 的 {len(new_items)} 个新条目增强内容...")
                 enhanced_items = asyncio.run(content_enhancer.enhance_items(new_items, 'indiehackers'))
+            elif feed_name == 'techcrunch_ai' and new_items:
+                logger.info(f"开始为 techcrunch_ai 的 {len(new_items)} 个新条目增强内容...")
+                enhanced_items = asyncio.run(content_enhancer.enhance_items(new_items, 'techcrunch'))
             else:
                 for item in new_items:
                     item['full_content'] = item.get('summary', '')
