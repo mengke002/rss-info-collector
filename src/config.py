@@ -98,7 +98,8 @@ class Config:
             },
             'techcrunch_ai': {
                 'rss_url': self.config.get('feeds', 'techcrunch_ai_rss'),
-                'interval': int(self.config.get('feeds', 'techcrunch_ai_interval'))
+                'interval': int(self.config.get('feeds', 'techcrunch_ai_interval')),
+                'strategy': 'requests'
             },
             'ycombinator': {
                 'rss_url': self.config.get('feeds', 'ycombinator_rss'),

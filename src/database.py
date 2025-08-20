@@ -117,7 +117,7 @@ class DatabaseManager:
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     title VARCHAR(255) NOT NULL,
                     link VARCHAR(512) UNIQUE NOT NULL,
-                    summary TEXT,
+                    full_content TEXT,
                     image_url VARCHAR(512),
                     guid VARCHAR(512) UNIQUE NOT NULL,
                     published_at DATETIME,
