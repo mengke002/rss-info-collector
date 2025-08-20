@@ -159,7 +159,7 @@ class Config:
                 'strategy': 'requests'
             },
             'ycombinator': {
-                'rss_url': self._get_config_value('feeds', 'ycombinator_rss', 'YCOMBINATOR_RSS', 'https://news.ycombinator.com/rss'),
+                'rss_url': self._get_config_value('feeds', 'ycombinator_rss', 'YCOMBINATOR_RSS', 'https://rsshub.rssforever.com/hackernews'),
                 'interval': self._get_config_value('feeds', 'ycombinator_interval', 'YCOMBINATOR_INTERVAL', 30, int),
                 'strategy': 'crawl4ai'
             }
