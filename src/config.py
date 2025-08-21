@@ -123,7 +123,7 @@ class Config:
             'indiehackers_developers': {'rss_url': 'https://ihrss.io/group/developers', 'interval': 1800},
             'indiehackers_saas': {'rss_url': 'https://ihrss.io/group/saas-marketing', 'interval': 1800},
             'ycombinator': {'rss_url': 'https://rsshub.rssforever.com/hackernews', 'interval': 1800},
-            'techcrunch': {'rss_url': 'https://rsshub.app/techcrunch/news', 'interval': 1800},
+            'techcrunch': {'rss_url': 'https://rsshub.rssforever.com/techcrunch/news', 'interval': 1800},
             'techcrunch_ai': {'rss_url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'interval': 1800},
         }
 
