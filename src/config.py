@@ -125,6 +125,8 @@ class Config:
             'ycombinator': {'rss_url': 'https://rsshub.rssforever.com/hackernews', 'interval': 1800},
             'techcrunch': {'rss_url': 'https://rsshub.rssforever.com/techcrunch/news', 'interval': 1800},
             'techcrunch_ai': {'rss_url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'interval': 1800},
+            'ezindie': {'rss_url': 'https://www.ezindie.com/feed/rss.xml', 'interval': 1800},
+            'decohack': {'rss_url': 'https://decohack.com/feed/', 'interval': 1800},
         }
 
         # 2. 动态发现 `config.ini` 中的所有源

@@ -241,12 +241,21 @@ class RSSParser:
                 if enclosure is not None and 'url' in enclosure.attrib:
                     data['cover_image_url'] = enclosure.attrib['url']
 
-            # 针对decohack，提取完整HTML内容和分类
+            # 针对decohack，将HTML内容转为Markdown并存储
             if 'decohack' in url:
                 content_encoded = self._get_element_text(item, 'content:encoded', namespaces)
                 if content_encoded:
-                    # 对于decohack，我们直接存储原始的、未转义的HTML
-                    data['full_content_html'] = html.unescape(content_encoded)
+                    try:
+                        import html2text
+                        h = html2text.HTML2Text()
+                        h.ignore_links = False
+                        h.ignore_images = False
+                        # 将HTML转换为Markdown并替换full_content_html
+                        markdown_content = h.handle(content_encoded)
+                        data['full_content_html'] = markdown_content
+                    except ImportError:
+                        logger.warning("html2text module not found. Falling back to storing unescaped HTML for decohack.")
+                        data['full_content_html'] = html.unescape(content_encoded)
                 
                 # 重新解析分类，因为之前的逻辑可能被覆盖
                 categories = []
