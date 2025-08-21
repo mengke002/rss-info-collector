@@ -39,51 +39,75 @@ class RSSParser:
             return self._parse_with_requests(url)
 
     def _parse_with_requests(self, url: str) -> List[Dict[str, Any]]:
-        """使用requests解析RSS源"""
+        """使用requests解析RSS源，并支持备用URL机制"""
         try:
             response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
             content = response.content.decode('utf-8', errors='ignore')
             return self._parse_xml_content(content, url)
         except Exception as e:
-            logger.error(f"Failed to parse RSS feed {url} with requests: {e}")
+            logger.warning(f"Failed to parse RSS feed {url} with requests: {e}")
+            
+            # 检查是否为RSSHub源，并尝试备用URL
+            if "https://rsshub.rssforever.com/" in url:
+                backup_url = url.replace("https://rsshub.rssforever.com/", "https://rsshub.app/")
+                logger.info(f"Attempting to fetch from backup URL: {backup_url}")
+                try:
+                    response = self.session.get(backup_url, timeout=self.timeout)
+                    response.raise_for_status()
+                    content = response.content.decode('utf-8', errors='ignore')
+                    return self._parse_xml_content(content, backup_url)
+                except Exception as backup_e:
+                    logger.error(f"Failed to parse RSS feed from backup URL {backup_url}: {backup_e}")
+            
             return []
 
     async def _parse_with_crawl4ai(self, url: str) -> List[Dict[str, Any]]:
-        """使用crawl4ai解析RSS源（异步）"""
+        """使用crawl4ai解析RSS源（异步），并支持备用URL机制"""
         try:
-            async with AsyncWebCrawler() as crawler:
-                result = await crawler.arun(url=url)
-            
-            # 直接从HTML中提取RSS内容，避免BeautifulSoup的解析问题
-            html_content = result.html
-            
-            # 查找RSS内容的开始和结束位置
-            rss_start = html_content.find('<rss')
-            rss_end = html_content.find('</rss>') + 6  # 包含</rss>标签
-            
-            if rss_start != -1 and rss_end != -1:
-                xml_content = html_content[rss_start:rss_end]
-                # 修复破损的XML结构
-                xml_content = self._fix_broken_xml(xml_content)
-                return self._parse_xml_content(xml_content, url)
-            else:
-                # 如果找不到RSS标签，尝试使用BeautifulSoup方法
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(html_content, 'html.parser')
-                xml_div = soup.find('div', {'id': 'webkit-xml-viewer-source-xml'})
-                if xml_div:
-                    rss_tag = xml_div.find('rss')
-                    if rss_tag:
-                        xml_content = str(rss_tag)
-                        xml_content = self._fix_broken_xml(xml_content)
-                        return self._parse_xml_content(xml_content, url)
-            
-            # 最后回退使用 requests 直接获取 RSS
-            return self._parse_with_requests(url)
+            return await self._fetch_and_parse_crawl4ai(url)
         except Exception as e:
-            logger.error(f"Failed to parse RSS feed {url} with crawl4ai: {e}")
+            logger.warning(f"Failed to parse RSS feed {url} with crawl4ai: {e}")
+            
+            # 检查是否为RSSHub源，并尝试备用URL
+            if "https://rsshub.rssforever.com/" in url:
+                backup_url = url.replace("https://rsshub.rssforever.com/", "https://rsshub.app/")
+                logger.info(f"Attempting to fetch from backup URL with crawl4ai: {backup_url}")
+                try:
+                    return await self._fetch_and_parse_crawl4ai(backup_url)
+                except Exception as backup_e:
+                    logger.error(f"Failed to parse RSS feed from backup URL {backup_url} with crawl4ai: {backup_e}")
+
             return []
+
+    async def _fetch_and_parse_crawl4ai(self, url: str) -> List[Dict[str, Any]]:
+        """crawl4ai的实际获取和解析逻辑"""
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(url=url)
+        
+        # 直接从HTML中提取RSS内容
+        html_content = result.html
+        
+        rss_start = html_content.find('<rss')
+        rss_end = html_content.find('</rss>') + 6
+        
+        if rss_start != -1 and rss_end != -1:
+            xml_content = html_content[rss_start:rss_end]
+            xml_content = self._fix_broken_xml(xml_content)
+            return self._parse_xml_content(xml_content, url)
+        else:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            xml_div = soup.find('div', {'id': 'webkit-xml-viewer-source-xml'})
+            if xml_div:
+                rss_tag = xml_div.find('rss')
+                if rss_tag:
+                    xml_content = str(rss_tag)
+                    xml_content = self._fix_broken_xml(xml_content)
+                    return self._parse_xml_content(xml_content, url)
+        
+        # 回退到requests
+        return self._parse_with_requests(url)
 
     def _parse_xml_content(self, content: str, url: str) -> List[Dict[str, Any]]:
         """从XML内容解析条目"""
