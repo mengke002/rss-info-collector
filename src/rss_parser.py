@@ -210,7 +210,28 @@ class RSSParser:
             else:
                 data['full_content'] = data['summary']
                 data['content_fetched_at'] = datetime.now()
-            
+
+            # 针对ezindie，提取封面图
+            if 'ezindie' in url:
+                enclosure = item.find('enclosure')
+                if enclosure is not None and 'url' in enclosure.attrib:
+                    data['cover_image_url'] = enclosure.attrib['url']
+
+            # 针对decohack，提取完整HTML内容和分类
+            if 'decohack' in url:
+                content_encoded = self._get_element_text(item, 'content:encoded', namespaces)
+                if content_encoded:
+                    # 对于decohack，我们直接存储原始的、未转义的HTML
+                    data['full_content_html'] = html.unescape(content_encoded)
+                
+                # 重新解析分类，因为之前的逻辑可能被覆盖
+                categories = []
+                for cat in item.findall('category'):
+                    if cat.text:
+                        categories.append(self._clean_html(cat.text))
+                if categories:
+                    data['category'] = ', '.join(categories)
+
             # 确保必要字段不为空
             if not data['link'] and not data['guid']:
                 return None

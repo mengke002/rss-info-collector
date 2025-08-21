@@ -107,66 +107,63 @@ class Config:
         }
     
     def get_feed_configs(self) -> Dict[str, Dict[str, Any]]:
-        """获取所有RSS源配置"""
-        feeds = {}
-        
-        # 可用的RSS源配置
-        working_feeds = {
-            'betalist': {
-                'rss_url': self._get_config_value('feeds', 'betalist_rss', 'BETALIST_RSS', 'https://betalist.com/feed'),
-                'interval': self._get_config_value('feeds', 'betalist_interval', 'BETALIST_INTERVAL', 30, int)
-            },
-            'theverge': {
-                'rss_url': self._get_config_value('feeds', 'theverge_rss', 'THEVERGE_RSS', 'https://www.theverge.com/rss/index.xml'),
-                'interval': self._get_config_value('feeds', 'theverge_interval', 'THEVERGE_INTERVAL', 30, int)
-            },
-            'indiehackers_alltime': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_alltime_rss', 'INDIEHACKERS_ALLTIME_RSS', 'https://www.indiehackers.com/feed/alltime'),
-                'interval': self._get_config_value('feeds', 'indiehackers_alltime_interval', 'INDIEHACKERS_ALLTIME_INTERVAL', 60, int)
-            },
-            'indiehackers_month': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_month_rss', 'INDIEHACKERS_MONTH_RSS', 'https://www.indiehackers.com/feed/month'),
-                'interval': self._get_config_value('feeds', 'indiehackers_month_interval', 'INDIEHACKERS_MONTH_INTERVAL', 60, int)
-            },
-            'indiehackers_week': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_week_rss', 'INDIEHACKERS_WEEK_RSS', 'https://www.indiehackers.com/feed/week'),
-                'interval': self._get_config_value('feeds', 'indiehackers_week_interval', 'INDIEHACKERS_WEEK_INTERVAL', 60, int)
-            },
-            'indiehackers_today': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_today_rss', 'INDIEHACKERS_TODAY_RSS', 'https://www.indiehackers.com/feed/today'),
-                'interval': self._get_config_value('feeds', 'indiehackers_today_interval', 'INDIEHACKERS_TODAY_INTERVAL', 60, int)
-            },
-            'indiehackers_growth': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_growth_rss', 'INDIEHACKERS_GROWTH_RSS', 'https://www.indiehackers.com/feed/growth'),
-                'interval': self._get_config_value('feeds', 'indiehackers_growth_interval', 'INDIEHACKERS_GROWTH_INTERVAL', 60, int)
-            },
-            'indiehackers_developers': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_developers_rss', 'INDIEHACKERS_DEVELOPERS_RSS', 'https://www.indiehackers.com/feed/developers'),
-                'interval': self._get_config_value('feeds', 'indiehackers_developers_interval', 'INDIEHACKERS_DEVELOPERS_INTERVAL', 60, int)
-            },
-            'indiehackers_saas': {
-                'rss_url': self._get_config_value('feeds', 'indiehackers_saas_rss', 'INDIEHACKERS_SAAS_RSS', 'https://www.indiehackers.com/feed/saas'),
-                'interval': self._get_config_value('feeds', 'indiehackers_saas_interval', 'INDIEHACKERS_SAAS_INTERVAL', 60, int)
-            },
-            'techcrunch': {
-                'rss_url': self._get_config_value('feeds', 'techcrunch_rss', 'TECHCRUNCH_RSS', 'https://techcrunch.com/feed/'),
-                'interval': self._get_config_value('feeds', 'techcrunch_interval', 'TECHCRUNCH_INTERVAL', 30, int),
-                'strategy': 'crawl4ai'
-            },
-            'techcrunch_ai': {
-                'rss_url': self._get_config_value('feeds', 'techcrunch_ai_rss', 'TECHCRUNCH_AI_RSS', 'https://techcrunch.com/category/artificial-intelligence/feed/'),
-                'interval': self._get_config_value('feeds', 'techcrunch_ai_interval', 'TECHCRUNCH_AI_INTERVAL', 30, int),
-                'strategy': 'requests'
-            },
-            'ycombinator': {
-                'rss_url': self._get_config_value('feeds', 'ycombinator_rss', 'YCOMBINATOR_RSS', 'https://rsshub.rssforever.com/hackernews'),
-                'interval': self._get_config_value('feeds', 'ycombinator_interval', 'YCOMBINATOR_INTERVAL', 30, int),
-                'strategy': 'crawl4ai'
-            }
+        """
+        获取所有RSS源配置, 遵循 环境变量 > config.ini > 默认值 的优先级.
+        同时支持从config.ini动态发现未在代码中定义的源.
+        """
+        # 1. 定义默认/已知的源及其默认值
+        default_feeds = {
+            'betalist': {'rss_url': 'https://feeds.feedburner.com/BetaList', 'interval': 1800},
+            'theverge': {'rss_url': 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', 'interval': 1800},
+            'indiehackers_alltime': {'rss_url': 'https://ihrss.io/top/all-time', 'interval': 2592000},
+            'indiehackers_month': {'rss_url': 'https://ihrss.io/top/month', 'interval': 604800},
+            'indiehackers_week': {'rss_url': 'https://ihrss.io/top/week', 'interval': 86400},
+            'indiehackers_today': {'rss_url': 'https://ihrss.io/top/today', 'interval': 1800},
+            'indiehackers_growth': {'rss_url': 'https://ihrss.io/group/growth', 'interval': 1800},
+            'indiehackers_developers': {'rss_url': 'https://ihrss.io/group/developers', 'interval': 1800},
+            'indiehackers_saas': {'rss_url': 'https://ihrss.io/group/saas-marketing', 'interval': 1800},
+            'ycombinator': {'rss_url': 'https://rsshub.rssforever.com/hackernews', 'interval': 1800},
+            'techcrunch': {'rss_url': 'https://rsshub.app/techcrunch/news', 'interval': 1800},
+            'techcrunch_ai': {'rss_url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'interval': 1800},
         }
-        
-        # 过滤掉URL为空的配置
-        return {name: config for name, config in working_feeds.items() if config['rss_url']}
+
+        # 2. 动态发现 `config.ini` 中的所有源
+        all_feed_names = set(default_feeds.keys())
+        if self.config_parser.has_section('feeds'):
+            discovered_names = {key[:-4] for key in self.config_parser.options('feeds') if key.endswith('_rss')}
+            all_feed_names.update(discovered_names)
+
+        # 3. 为每个源构建最终配置, 应用优先级逻辑
+        final_feeds = {}
+        for name in all_feed_names:
+            defaults = default_feeds.get(name, {})
+            default_url = defaults.get('rss_url')
+            default_interval = defaults.get('interval', 1800)
+
+            # 构造用于查找的键
+            config_key_rss = f"{name}_rss"
+            env_var_rss = config_key_rss.upper()
+            config_key_interval = f"{name}_interval"
+            env_var_interval = config_key_interval.upper()
+
+            # 使用辅助函数按优先级获取值
+            rss_url = self._get_config_value('feeds', config_key_rss, env_var_rss, default_url)
+            interval = self._get_config_value('feeds', config_key_interval, env_var_interval, default_interval, int)
+            
+            if rss_url:
+                final_feeds[name] = {
+                    'rss_url': rss_url,
+                    'interval': interval
+                }
+                # 分配特定策略
+                if 'techcrunch' in name and name != 'techcrunch_ai':
+                    final_feeds[name]['strategy'] = 'crawl4ai'
+                elif 'ycombinator' in name:
+                    final_feeds[name]['strategy'] = 'crawl4ai'
+                else:
+                    final_feeds[name]['strategy'] = 'requests'
+
+        return final_feeds
 
 # 全局配置实例
 config = Config()

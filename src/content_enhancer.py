@@ -151,6 +151,31 @@ class ContentEnhancer:
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
         
         return text
+
+    def _clean_ezindie_content(self, markdown: str) -> str:
+        """
+        清洗ezindie.com的Markdown内容，移除页眉、页脚和广告。
+        """
+        if not markdown:
+            return ""
+
+        # 1. 删除页眉：找到第一个H1标题，保留之后的内容
+        h1_match = re.search(r'^#\s.*', markdown, re.MULTILINE)
+        if h1_match:
+            markdown = markdown[h1_match.start():]
+        else:
+            # 如果没有H1，可能格式有变，返回原始内容以防误删
+            return markdown
+
+        # 2. 删除广告链接
+        markdown = re.sub(r'\[每日看板-Tabhub.*?\]\(https?://www\.tabhub\.app/?\)\s*\n?', '', markdown, flags=re.MULTILINE)
+
+        # 3. 删除页脚：从“更多及时推送，扫码订阅”开始
+        footer_match = re.search(r'更多及时推送，扫码订阅', markdown)
+        if footer_match:
+            markdown = markdown[:footer_match.start()]
+
+        return markdown.strip()
     
     async def _fetch_batch(self, items_batch: list, enhancer, feed_type: str) -> list:
         fetch_tasks = []
@@ -188,15 +213,23 @@ class ContentEnhancer:
                     e['content_fetched_at'] = None
                     logger.warning(f"内容抓取失败: {item.get('title', 'N/A')[:50]}... - {str(content)}")
                 elif content:
-                    # 检查是否是抓取失败后返回的错误信息
                     is_error_content = content.startswith(('# Error', '# Fetch'))
                     
-                    if feed_type == 'indiehackers' and not is_error_content:
-                        content = enhancer._extract_main_content(content)
-                    elif feed_type == 'techcrunch' and not is_error_content:
-                        content = enhancer._clean_techcrunch_content(content)
+                    cleaned_content = content
+                    if not is_error_content:
+                        if feed_type == 'indiehackers':
+                            cleaned_content = enhancer._extract_main_content(content)
+                        elif feed_type == 'techcrunch':
+                            cleaned_content = enhancer._clean_techcrunch_content(content)
+                        elif feed_type == 'ezindie':
+                            cleaned_content = enhancer._clean_ezindie_content(content)
+
+                    # 根据源类型，将清洗后的内容存入正确的字段
+                    if feed_type == 'ezindie':
+                        e['full_content_markdown'] = cleaned_content
+                    else:
+                        e['full_content'] = cleaned_content
                     
-                    e['full_content'] = content
                     e['content_fetched_at'] = datetime.now()
                     
                     if not is_error_content:
@@ -213,15 +246,22 @@ class ContentEnhancer:
 
     async def enhance_items(self, items: list, feed_type: str, batch_size: int = 5, batch_delay: float = 2.0) -> list:
         enhanced_items = []
-        if feed_type not in ('ycombinator', 'indiehackers', 'techcrunch'):
+
+        # decohack 的内容在解析时已获取，无需增强，直接返回
+        if feed_type == 'decohack':
+            return items
+
+        # 需要爬取内容的源
+        if feed_type not in ('ycombinator', 'indiehackers', 'techcrunch', 'ezindie'):
             for item in items:
                 e = item.copy()
+                # 对于其他源，默认使用 summary 作为 full_content
                 e['full_content'] = item.get('summary', '')
                 e['content_fetched_at'] = datetime.now()
                 enhanced_items.append(e)
             return enhanced_items
 
-        # 为 indiehackers 使用更保守的批处理策略
+        # 为 indiehackers 和其他敏感源使用更保守的批处理策略
         if feed_type == 'indiehackers':
             batch_size = 3  # 减小批次大小
             batch_delay = 5.0  # 增加批次间延迟

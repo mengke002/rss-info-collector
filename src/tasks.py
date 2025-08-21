@@ -19,6 +19,8 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
         'rss_betalist': ['title', 'link', 'visit_url', 'guid', 'author', 'summary', 'image_url', 'published_at', 'updated_at'],
         'rss_theverge': ['title', 'link', 'author', 'summary', 'image_url', 'guid', 'category', 'published_at', 'updated_at'],
         'rss_techcrunch': ['title', 'link', 'full_content', 'image_url', 'guid', 'published_at'],
+        'rss_ezindie': ['guid', 'title', 'link', 'author', 'summary', 'cover_image_url', 'full_content_markdown', 'published_at'],
+        'rss_decohack': ['guid', 'title', 'link', 'category', 'full_content_html', 'published_at'],
     }
     if table_name not in table_columns:
         return items
@@ -72,7 +74,21 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
             'title': 255,
             'link': 512,
             'guid': 512
-        }
+        },
+       'rss_ezindie': {
+           'guid': 255,
+           'title': 255,
+           'link': 255,
+           'author': 100,
+           'summary': 512,
+           'cover_image_url': 512,
+       },
+       'rss_decohack': {
+           'guid': 255,
+           'title': 255,
+           'link': 255,
+           'category': 100,
+       }
     }
     normalized_items = []
     expected_keys = set(table_columns[table_name])
@@ -101,11 +117,13 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
     feed_configs = config.get_feed_configs()
     feeds = feed_configs
     if feed_to_crawl:
-        if feed_to_crawl not in feeds:
+        # 确保即使传递了 'ezindie_rss' 也能匹配到 'ezindie'
+        normalized_feed_to_crawl = feed_to_crawl.replace('_rss', '')
+        if normalized_feed_to_crawl not in feeds:
             results['success'] = False
             results['errors'].append(f"Feed '{feed_to_crawl}' not found in configuration.")
             return results
-        feeds = {feed_to_crawl: feeds[feed_to_crawl]}
+        feeds = {normalized_feed_to_crawl: feeds[normalized_feed_to_crawl]}
 
     for feed_name, feed_config in feeds.items():
         try:
@@ -115,12 +133,19 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
             if 'indiehackers' in feed_name:
                 table_name = "rss_indiehackers"
                 feed_type = feed_name.replace('indiehackers_', '')
-            elif feed_name in ('techcrunch', 'techcrunch_ai'):
+            elif 'techcrunch' in feed_name:
                 table_name = "rss_techcrunch"
-                feed_type = None
+                feed_type = 'techcrunch'
+            elif 'ezindie' in feed_name:
+                table_name = "rss_ezindie"
+                feed_type = 'ezindie'
+            elif 'decohack' in feed_name:
+                table_name = "rss_decohack"
+                feed_type = 'decohack'
             else:
+                # 默认情况下，表名为 rss_{feed_name}
                 table_name = f"rss_{feed_name}"
-                feed_type = None
+                feed_type = feed_name
 
             # 获取已存在的GUID
             existing_guids = db_manager.get_existing_guids(table_name)
@@ -145,9 +170,16 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
             elif feed_name in ('techcrunch', 'techcrunch_ai') and new_items:
                 logger.info(f"开始为 {feed_name} 的 {len(new_items)} 个新条目增强内容...")
                 enhanced_items = asyncio.run(content_enhancer.enhance_items(new_items, 'techcrunch'))
+            elif 'ezindie' in feed_name and new_items:
+               logger.info(f"开始为 ezindie 的 {len(new_items)} 个新条目增强内容...")
+               enhanced_items = asyncio.run(content_enhancer.enhance_items(new_items, 'ezindie'))
+            elif 'decohack' in feed_name and new_items:
+               # decohack 内容已在解析时获取，直接使用
+               enhanced_items = new_items
             else:
                 for item in new_items:
-                    item['full_content'] = item.get('summary', '')
+                    if 'full_content' not in item:
+                        item['full_content'] = item.get('summary', '')
                     item['content_fetched_at'] = datetime.now()
                 enhanced_items = new_items
 
@@ -196,7 +228,9 @@ def run_cleanup_task(db_manager: DatabaseManager, days: int = None) -> Dict[str,
         'theverge': 'rss_theverge',
         'techcrunch': 'rss_techcrunch',
         'indiehackers': 'rss_indiehackers',
-        'ycombinator': 'rss_ycombinator'
+        'ycombinator': 'rss_ycombinator',
+        'ezindie': 'rss_ezindie',
+        'decohack': 'rss_decohack'
     }
 
     for feed_key, table_name in tables_to_cleanup.items():
@@ -228,7 +262,9 @@ def run_stats_task(db_manager: DatabaseManager) -> Dict[str, Any]:
         'theverge': 'rss_theverge',
         'techcrunch': 'rss_techcrunch',
         'indiehackers': 'rss_indiehackers',
-        'ycombinator': 'rss_ycombinator'
+        'ycombinator': 'rss_ycombinator',
+        'ezindie': 'rss_ezindie',
+        'decohack': 'rss_decohack'
     }
 
     for feed_key, table_name in tables_to_stats.items():

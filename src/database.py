@@ -164,6 +164,36 @@ class DatabaseManager:
                     INDEX idx_content_fetched (content_fetched_at),
                     INDEX idx_feed_type (feed_type)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            
+            'rss_ezindie': """
+                CREATE TABLE IF NOT EXISTS rss_ezindie (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    guid VARCHAR(255) UNIQUE NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    link VARCHAR(255) NOT NULL,
+                    author VARCHAR(100),
+                    summary VARCHAR(512),
+                    cover_image_url VARCHAR(512),
+                    full_content_markdown TEXT,
+                    published_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_published (published_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """,
+
+            'rss_decohack': """
+                CREATE TABLE IF NOT EXISTS rss_decohack (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    guid VARCHAR(255) UNIQUE NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    link VARCHAR(255) NOT NULL,
+                    category VARCHAR(100),
+                    full_content_html TEXT,
+                    published_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_published (published_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             """
         }
     
