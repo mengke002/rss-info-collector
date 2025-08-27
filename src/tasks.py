@@ -2,7 +2,7 @@
 核心任务模块
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, List
 
 from .config import config
@@ -10,6 +10,23 @@ from .rss_parser import rss_parser
 from .content_enhancer import content_enhancer
 from .logger import logger
 from .database import DatabaseManager
+
+
+def _get_existing_decohack_data_for_today(db_manager: DatabaseManager) -> set:
+    """获取今天已经存在的Decohack产品数据"""
+    try:
+        today = date.today()
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT CONCAT(product_name, '_', crawl_date) as product_key
+                    FROM rss_decohack_products 
+                    WHERE crawl_date = %s
+                """, (today,))
+                return {row[0] for row in cursor.fetchall()}
+    except Exception as e:
+        logger.error(f"获取今天已存在的Decohack数据失败: {e}")
+        return set()
 
 
 def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> List[Dict[str, Any]]:
@@ -20,7 +37,7 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
         'rss_theverge': ['title', 'link', 'author', 'summary', 'image_url', 'guid', 'category', 'published_at', 'updated_at'],
         'rss_techcrunch': ['title', 'link', 'full_content', 'image_url', 'guid', 'published_at'],
         'rss_ezindie': ['guid', 'title', 'link', 'author', 'summary', 'cover_image_url', 'full_content_markdown', 'published_at'],
-        'rss_decohack': ['guid', 'title', 'link', 'category', 'full_content_html', 'published_at'],
+        'rss_decohack_products': ['product_name', 'tagline', 'description', 'product_url', 'ph_url', 'image_url', 'vote_count', 'is_featured', 'keywords', 'ph_publish_date', 'crawl_date'],
     }
     if table_name not in table_columns:
         return items
@@ -83,11 +100,14 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
            'summary': 512,
            'cover_image_url': 512,
        },
-       'rss_decohack': {
-           'guid': 255,
-           'title': 255,
-           'link': 255,
-           'category': 100,
+       'rss_decohack_products': {
+           'product_name': 100,
+           'tagline': 200,
+           'description': 800,
+           'product_url': 400,
+           'ph_url': 400,
+           'image_url': 400,
+           'keywords': 300,
        }
     }
     normalized_items = []
@@ -140,26 +160,47 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
                 table_name = "rss_ezindie"
                 feed_type = 'ezindie'
             elif 'decohack' in feed_name:
-                table_name = "rss_decohack"
+                table_name = "rss_decohack_products"
                 feed_type = 'decohack'
             else:
                 # 默认情况下，表名为 rss_{feed_name}
                 table_name = f"rss_{feed_name}"
                 feed_type = feed_name
 
-            # 获取已存在的GUID
-            existing_guids = db_manager.get_existing_guids(table_name)
+            # 获取已存在的数据用于去重
+            if 'decohack' in feed_name:
+                # 对于decohack，检查今天是否已经爬取过
+                existing_items = _get_existing_decohack_data_for_today(db_manager)
+            else:
+                existing_guids = db_manager.get_existing_guids(table_name)
 
             # 解析RSS
             items = rss_parser.parse_feed(feed_config)
 
             # 过滤新条目并添加feed_type
             new_items = []
-            for item in items:
-                if item['guid'] not in existing_guids:
-                    if feed_type:
-                        item['feed_type'] = feed_type
-                    new_items.append(item)
+            if 'decohack' in feed_name:
+                # 特殊处理Decohack：解析产品详情并去重
+                for item in items:
+                    if item.get('is_decohack_source') and item.get('full_content_html'):
+                        # 解析产品详情
+                        today = date.today()
+                        products = rss_parser.parse_decohack_products(
+                            item['full_content_html'], 
+                            today
+                        )
+                        
+                        # 过滤今天已经存在的产品
+                        for product in products:
+                            product_key = f"{product['product_name']}_{today}"
+                            if product_key not in existing_items:
+                                new_items.append(product)
+            else:
+                for item in items:
+                    if item['guid'] not in existing_guids:
+                        if feed_type:
+                            item['feed_type'] = feed_type
+                        new_items.append(item)
 
             if feed_name == 'ycombinator' and new_items:
                 logger.info(f"开始为 ycombinator 的 {len(new_items)} 个新条目增强内容...")
@@ -174,7 +215,8 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
                logger.info(f"开始为 ezindie 的 {len(new_items)} 个新条目增强内容...")
                enhanced_items = asyncio.run(content_enhancer.enhance_items(new_items, 'ezindie'))
             elif 'decohack' in feed_name and new_items:
-               # decohack 内容已在解析时获取，直接使用
+               # decohack 产品数据已经解析完成，直接使用
+               logger.info(f"Decohack解析到 {len(new_items)} 个新产品")
                enhanced_items = new_items
             else:
                 for item in new_items:
@@ -230,7 +272,7 @@ def run_cleanup_task(db_manager: DatabaseManager, days: int = None) -> Dict[str,
         'indiehackers': 'rss_indiehackers',
         'ycombinator': 'rss_ycombinator',
         'ezindie': 'rss_ezindie',
-        'decohack': 'rss_decohack'
+        'decohack': 'rss_decohack_products'
     }
 
     for feed_key, table_name in tables_to_cleanup.items():
@@ -264,7 +306,7 @@ def run_stats_task(db_manager: DatabaseManager) -> Dict[str, Any]:
         'indiehackers': 'rss_indiehackers',
         'ycombinator': 'rss_ycombinator',
         'ezindie': 'rss_ezindie',
-        'decohack': 'rss_decohack'
+        'decohack': 'rss_decohack_products'
     }
 
     for feed_key, table_name in tables_to_stats.items():

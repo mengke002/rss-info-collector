@@ -182,18 +182,29 @@ class DatabaseManager:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             """,
 
-            'rss_decohack': """
-                CREATE TABLE IF NOT EXISTS rss_decohack (
+            'rss_decohack_products': """
+                CREATE TABLE IF NOT EXISTS rss_decohack_products (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    guid VARCHAR(255) UNIQUE NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    link VARCHAR(255) NOT NULL,
-                    category VARCHAR(100),
-                    full_content_html TEXT,
-                    published_at DATETIME,
+                    product_name VARCHAR(100) NOT NULL COMMENT '产品名称',
+                    tagline VARCHAR(200) NOT NULL COMMENT '产品标语', 
+                    description VARCHAR(800) NOT NULL COMMENT '产品介绍',
+                    product_url VARCHAR(400) COMMENT '产品官网链接',
+                    ph_url VARCHAR(400) COMMENT 'Product Hunt页面链接', 
+                    image_url VARCHAR(400) COMMENT '产品图片URL',
+                    vote_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '投票数',
+                    is_featured BOOLEAN DEFAULT FALSE COMMENT '是否精选',
+                    keywords VARCHAR(300) COMMENT '产品关键词',
+                    ph_publish_date DATE COMMENT 'PH发布日期',
+                    crawl_date DATE NOT NULL COMMENT '抓取日期(用于去重)',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_published (published_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY unique_product_date (product_name, crawl_date) COMMENT '产品名称+抓取日期唯一',
+                    INDEX idx_crawl_date (crawl_date),
+                    INDEX idx_ph_publish (ph_publish_date),
+                    INDEX idx_featured (is_featured),
+                    INDEX idx_votes (vote_count DESC)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+                COMMENT='Decohack产品热榜数据表 - 细粒度存储每个产品信息'
             """
         }
     

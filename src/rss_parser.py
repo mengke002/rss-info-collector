@@ -3,13 +3,14 @@ RSS解析器模块
 """
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 import html
 import re
 import io
 import asyncio
 from crawl4ai import AsyncWebCrawler
+from bs4 import BeautifulSoup
 
 from .logger import logger
 
@@ -27,6 +28,9 @@ class RSSParser:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive'
         })
+        # Decohack解析相关的正则表达式
+        self.vote_pattern = re.compile(r'🔺(\d+)')
+        self.time_pattern = re.compile(r'(\d{4})年(\d{2})月(\d{2})日')
     
     def parse_feed(self, feed_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """解析RSS源"""
@@ -241,23 +245,15 @@ class RSSParser:
                 if enclosure is not None and 'url' in enclosure.attrib:
                     data['cover_image_url'] = enclosure.attrib['url']
 
-            # 针对decohack，将HTML内容转为Markdown并存储
+            # 针对decohack，跳过旧的解析逻辑，标记为需要特殊处理
             if 'decohack' in url:
+                # 标记为decohack源，后续会用专门的解析器处理
+                data['is_decohack_source'] = True
                 content_encoded = self._get_element_text(item, 'content:encoded', namespaces)
                 if content_encoded:
-                    try:
-                        import html2text
-                        h = html2text.HTML2Text()
-                        h.ignore_links = False
-                        h.ignore_images = False
-                        # 将HTML转换为Markdown并替换full_content_html
-                        markdown_content = h.handle(content_encoded)
-                        data['full_content_html'] = markdown_content
-                    except ImportError:
-                        logger.warning("html2text module not found. Falling back to storing unescaped HTML for decohack.")
-                        data['full_content_html'] = html.unescape(content_encoded)
+                    data['full_content_html'] = content_encoded  # 保存原始HTML用于后续解析
                 
-                # 重新解析分类，因为之前的逻辑可能被覆盖
+                # 重新解析分类
                 categories = []
                 for cat in item.findall('category'):
                     if cat.text:
@@ -393,6 +389,138 @@ class RSSParser:
         s = re.sub(r'&([A-Za-z][A-Za-z0-9]+);', repl_named, s)
         s = re.sub(r'&(?!#\d+;|#x[0-9a-fA-F]+;|amp;|lt;|gt;|quot;|apos;|[A-Za-z][A-Za-z0-9]+;)', '&amp;', s)
         return s
+
+    def parse_decohack_products(self, content_html: str, crawl_date: date) -> List[Dict[str, Any]]:
+        """解析Decohack每日热榜中的产品信息"""
+        if not content_html:
+            return []
+        
+        try:
+            soup = BeautifulSoup(content_html, 'html.parser')
+            products = []
+            
+            # 查找所有产品条目 (以h2标签开始的产品块)
+            product_sections = soup.find_all('h2')
+            
+            for i, h2 in enumerate(product_sections):
+                try:
+                    product_data = self._parse_single_decohack_product(h2, crawl_date)
+                    if product_data:
+                        products.append(product_data)
+                except Exception as e:
+                    logger.warning(f"解析第{i+1}个产品时出错: {e}")
+                    continue
+            
+            logger.info(f"成功解析{len(products)}个产品")
+            return products
+            
+        except Exception as e:
+            logger.error(f"解析Decohack产品列表失败: {e}")
+            return []
+    
+    def _parse_single_decohack_product(self, h2_element, crawl_date: date) -> Optional[Dict[str, Any]]:
+        """解析单个Decohack产品信息"""
+        try:
+            # 获取产品名称和PH链接
+            product_link = h2_element.find('a')
+            if not product_link:
+                return None
+                
+            product_name = self._extract_product_name(product_link.get_text())
+            ph_url = product_link.get('href', '')
+            
+            # 获取产品所在的段落容器
+            current = h2_element
+            product_info = {}
+            
+            # 遍历h2后面的元素直到下一个h2或hr
+            while current and current.next_sibling:
+                current = current.next_sibling
+                if hasattr(current, 'name'):
+                    if current.name == 'h2':
+                        break
+                    elif current.name == 'hr':
+                        break
+                    elif current.name == 'p':
+                        self._parse_decohack_product_paragraph(current, product_info)
+            
+            # 构建产品数据
+            return {
+                'product_name': product_name[:100],  # 限制长度
+                'tagline': product_info.get('tagline', '')[:200],
+                'description': product_info.get('description', '')[:800],
+                'product_url': product_info.get('product_url', '')[:400],
+                'ph_url': ph_url[:400],
+                'image_url': product_info.get('image_url', '')[:400],
+                'vote_count': product_info.get('vote_count', 0),
+                'is_featured': product_info.get('is_featured', False),
+                'keywords': product_info.get('keywords', '')[:300],
+                'ph_publish_date': product_info.get('ph_publish_date'),
+                'crawl_date': crawl_date
+            }
+            
+        except Exception as e:
+            logger.error(f"解析单个产品失败: {e}")
+            return None
+    
+    def _extract_product_name(self, text: str) -> str:
+        """提取产品名称(去掉序号)"""
+        # 移除开头的数字序号，如 "1. Creem 1.0" -> "Creem 1.0"
+        cleaned = re.sub(r'^\d+\.\s*', '', text.strip())
+        return cleaned
+    
+    def _parse_decohack_product_paragraph(self, p_element, product_info: Dict[str, Any]):
+        """解析Decohack产品段落信息"""
+        text = p_element.get_text()
+        
+        # 解析标语
+        tagline_match = re.search(r'标语：(.+?)(?:\n|介绍：)', text)
+        if tagline_match:
+            product_info['tagline'] = tagline_match.group(1).strip()
+        
+        # 解析介绍
+        desc_match = re.search(r'介绍：(.+?)(?:\n|产品网站：)', text)
+        if desc_match:
+            product_info['description'] = desc_match.group(1).strip()
+        
+        # 解析关键词
+        keywords_match = re.search(r'关键词：(.+?)(?:\n|票数：)', text)
+        if keywords_match:
+            product_info['keywords'] = keywords_match.group(1).strip()
+        
+        # 解析票数
+        vote_match = self.vote_pattern.search(text)
+        if vote_match:
+            try:
+                product_info['vote_count'] = int(vote_match.group(1))
+            except ValueError:
+                product_info['vote_count'] = 0
+        
+        # 解析是否精选
+        if '是否精选：是' in text:
+            product_info['is_featured'] = True
+        
+        # 解析发布时间
+        time_match = self.time_pattern.search(text)
+        if time_match:
+            try:
+                year, month, day = map(int, time_match.groups())
+                product_info['ph_publish_date'] = date(year, month, day)
+            except ValueError:
+                pass
+        
+        # 解析产品网站链接
+        product_links = p_element.find_all('a')
+        for link in product_links:
+            link_text = link.get_text().strip()
+            if '立即访问' in link_text or '产品网站' in link_text:
+                product_info['product_url'] = link.get('href', '')
+                break
+        
+        # 解析产品图片
+        img = p_element.find('img')
+        if img and img.get('src'):
+            product_info['image_url'] = img.get('src')
 
 # 全局解析器实例
 rss_parser = RSSParser()
