@@ -189,7 +189,7 @@ class RSSParser:
             data = {}
             data['title'] = self._get_element_text(item, 'title', namespaces) or "无标题"
             data['link'] = self._get_element_text(item, 'link', namespaces) or ""
-            data['guid'] = self._get_element_text(item, 'guid', namespaces, data['link']) or data['link']
+            data['guid'] = self._get_element_text(item, 'guid', namespaces, data['link']) or data['link'] or f"rss-{hash(str(item))}"
             
             # 检测是否为ycombinator RSS
             is_ycombinator = 'ycombinator' in url or 'hackernews' in url
@@ -274,9 +274,9 @@ class RSSParser:
         """解析Atom条目"""
         try:
             data = {}
-            data['title'] = self._get_element_text(entry, 'atom:title', namespaces)
+            data['title'] = self._get_element_text(entry, 'atom:title', namespaces) or "无标题"
             data['link'] = entry.find('atom:link', namespaces).get('href') if entry.find('atom:link', namespaces) is not None else ''
-            data['guid'] = self._get_element_text(entry, 'atom:id', namespaces, data['link'])
+            data['guid'] = self._get_element_text(entry, 'atom:id', namespaces, data['link']) or data['link'] or f"atom-{hash(str(entry))}"
 
             summary_html = self._get_element_text(entry, 'atom:summary', namespaces)
             content_html = self._get_element_text(entry, 'atom:content', namespaces)

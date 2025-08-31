@@ -252,12 +252,21 @@ class DataAnalyzer:
                 'business_model': None
             }
             
-            # 检查是否至少提取到了产品名称
-            if product_info.get('product_name'):
-                logger.info(f"正则表达式托底解析成功：{product_info.get('product_name')}")
+            # 检查是否提取到了有用信息（放宽条件，不强制要求产品名称）
+            has_useful_info = (
+                product_info.get('product_name') or 
+                product_info.get('tagline') or 
+                product_info.get('description')
+            )
+            
+            if has_useful_info:
+                if product_info.get('product_name'):
+                    logger.info(f"正则表达式托底解析成功：{product_info.get('product_name')}")
+                else:
+                    logger.info("正则表达式托底解析成功：提取到了有价值的内容信息")
                 return product_info
             else:
-                logger.warning("正则表达式解析未能提取到产品名称")
+                logger.warning("正则表达式解析未能提取到有用信息")
                 return None
                 
         except Exception as e:
@@ -405,17 +414,34 @@ class DataAnalyzer:
             # 准备插入数据
             insert_data = []
             for product in products:
+                # 处理product_name为null的情况，使用占位符
+                product_name = product.get('product_name')
+                if not product_name or not product_name.strip():
+                    # 根据来源生成描述性占位符
+                    source_feed = product.get('source_feed', 'unknown') or 'unknown'
+                    tagline = (product.get('tagline') or '').strip()
+                    description = (product.get('description') or '').strip()
+                    
+                    if tagline:
+                        product_name = f"[{source_feed}内容] {tagline[:50]}"
+                    elif description:
+                        product_name = f"[{source_feed}内容] {description[:50]}"
+                    else:
+                        product_name = f"[{source_feed}未命名内容]"
+                    
+                    logger.debug(f"为空产品名称生成占位符: {product_name}")
+                
                 metrics_json = json.dumps(product.get('metrics', {}), ensure_ascii=False)
                 
                 item_data = {
-                    'product_name': product.get('product_name'),
+                    'product_name': product_name,
                     'tagline': product.get('tagline'),
                     'description': product.get('description'),
                     'product_url': product.get('product_url'),
                     'image_url': product.get('image_url'),
                     'categories': product.get('categories'),
                     'metrics': metrics_json,
-                    'source_feed': product.get('source_feed'),
+                    'source_feed': product.get('source_feed', 'unknown') or 'unknown',
                     'source_published_at': product.get('source_published_at')
                 }
                 insert_data.append(item_data)
