@@ -159,7 +159,7 @@ jobs:
         pip install -r requirements.txt
         
     - name: Run product discovery analysis
-      run: python main.py --task analyze --batch-size 100
+      run: python main.py --task analyze --batch-size 1000
       
     - name: Generate product discovery report (Daily)
       if: github.event_name == 'schedule' || github.event.inputs.task == 'product_report_daily'

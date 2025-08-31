@@ -36,7 +36,9 @@ def run_product_discovery_report_task():
     """运行产品发现报告生成任务"""
     logger.info("开始执行产品发现报告生成任务...")
     try:
-        report_generator = ProductDiscoveryReportGenerator()
+        # 使用全局的db_manager实例
+        db_manager = DatabaseManager(config)
+        report_generator = ProductDiscoveryReportGenerator(db_manager)
         report_uuid = report_generator.generate_report(days=7)
         if report_uuid:
             logger.info(f"产品发现报告生成任务完成，报告UUID: {report_uuid}")
@@ -51,7 +53,7 @@ def run_tech_news_report_task():
     logger.info("开始执行科技新闻分析报告生成任务...")
     try:
         # 1. 从数据库获取待分析数据
-        db_manager = DatabaseManager()
+        db_manager = DatabaseManager(config)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=7)
         time_range_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
@@ -66,8 +68,20 @@ def run_tech_news_report_task():
         analysis_results = analyzer.analyze_articles(articles)
 
         # 3. 调用报告生成器生成并存储报告
-        report_generator = TechNewsReportGenerator()
-        report_uuid = report_generator.generate_weekly_report(analysis_results, time_range_str)
+        report_generator = TechNewsReportGenerator(db_manager)
+        
+        # 需要先生成报告内容，然后调用generate_report方法
+        # 这里我们需要从analysis_results中提取报告内容
+        # 简化处理：使用analysis_results的JSON字符串作为报告内容
+        report_content = f"# 科技新闻分析报告\n\n时间范围: {time_range_str}\n\n"
+        report_content += f"分析文章数: {len(articles)}\n\n"
+        report_content += f"分析结果:\n```json\n{json.dumps(analysis_results, ensure_ascii=False, indent=2)}\n```"
+        
+        report_uuid = report_generator.generate_report(
+            full_report_md=report_content,
+            article_count=len(articles),
+            time_range_str=time_range_str
+        )
         
         if report_uuid:
             logger.info(f"科技新闻分析报告生成任务完成，报告UUID: {report_uuid}")

@@ -22,11 +22,14 @@ logger = logging.getLogger(__name__)
 class TechNewsReportGenerator:
     """科技与创投新闻分析报告生成器"""
 
-    def __init__(self):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
         """初始化报告生成器"""
         # self.reports_dir = 'reports'
         # os.makedirs(self.reports_dir, exist_ok=True)
-        self.db_manager = DatabaseManager(config)
+        if db_manager is not None:
+            self.db_manager = db_manager
+        else:
+            self.db_manager = DatabaseManager(config)
         logger.info("科技新闻报告生成器初始化完成")
 
     def get_beijing_time(self) -> datetime:
@@ -207,11 +210,14 @@ class TechNewsReportGenerator:
 class ProductDiscoveryReportGenerator:
     """产品发现报告生成器"""
 
-    def __init__(self):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
         """初始化报告生成器"""
         # self.reports_dir = 'reports'
         # os.makedirs(self.reports_dir, exist_ok=True)
-        self.db_manager = DatabaseManager(config)
+        if db_manager is not None:
+            self.db_manager = db_manager
+        else:
+            self.db_manager = DatabaseManager(config)
         logger.info("产品发现报告生成器初始化完成")
 
     def get_beijing_time(self) -> datetime:
@@ -296,7 +302,8 @@ class ProductDiscoveryReportGenerator:
         start_date = end_date - timedelta(days=days)
         time_range_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
 
-        products = self.db_manager.get_discovered_products(days=days)
+        # 使用高级去重策略获取产品
+        products = self.db_manager.get_discovered_products_with_advanced_dedup(days=days)
         if not products:
             logger.warning("在指定时间范围内没有发现任何产品，不生成报告。")
             return None
@@ -358,10 +365,14 @@ class ProductDiscoveryReportGenerator:
 class InsightsReportGenerator:
     """洞察报告生成器，整合科技新闻与产品发现报告"""
 
-    def __init__(self):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
         """初始化报告生成器"""
-        self.tech_news_generator = TechNewsReportGenerator()
-        self.product_discovery_generator = ProductDiscoveryReportGenerator()
+        if db_manager is not None:
+            self.tech_news_generator = TechNewsReportGenerator(db_manager)
+            self.product_discovery_generator = ProductDiscoveryReportGenerator(db_manager)
+        else:
+            self.tech_news_generator = TechNewsReportGenerator()
+            self.product_discovery_generator = ProductDiscoveryReportGenerator()
         logger.info("洞察报告生成器初始化完成")
 
     def generate_insights_report(self, analysis_results: Dict[str, Any], period: str = 'daily'):
@@ -406,21 +417,45 @@ def generate_product_discovery_report(db_manager: DatabaseManager, period: str =
     Returns:
         报告生成结果
     """
-    generator = ProductDiscoveryReportGenerator()
-    return generator.generate_report(period, include_analysis)
+    generator = ProductDiscoveryReportGenerator(db_manager)
+    
+    # 根据周期确定天数
+    if period == 'weekly':
+        days = 7
+    elif period == 'daily':
+        days = 1
+    elif period == 'monthly':
+        days = 30
+    else:
+        days = 7  # 默认值
+    
+    result = generator.generate_report(days=days)
+    
+    if result:
+        return {
+            'success': True,
+            'report_uuid': result,
+            'report_path': f"数据库中的报告UUID: {result}"
+        }
+    else:
+        return {
+            'success': False,
+            'error': '报告生成失败，未能获取报告UUID'
+        }
 
-def generate_tech_news_report(analysis_results: Dict[str, Any], time_range_str: str) -> Dict[str, Any]:
+def generate_tech_news_report(analysis_results: Dict[str, Any], time_range_str: str, db_manager: Optional[DatabaseManager] = None) -> Dict[str, Any]:
     """
     便捷函数：生成科技新闻分析报告
     
     Args:
         analysis_results: 来自TechNewsAnalyzer的完整分析结果
         time_range_str: 时间范围描述字符串
+        db_manager: 数据库管理器（可选）
         
     Returns:
         报告生成结果
     """
-    generator = TechNewsReportGenerator()
+    generator = TechNewsReportGenerator(db_manager)
     report_uuid = generator.generate_report(analysis_results, time_range_str)
     
     if report_uuid:

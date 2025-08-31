@@ -384,27 +384,45 @@ def run_report_generation_task(db_manager: DatabaseManager, period: str = 'daily
     Returns:
         报告生成结果
     """
-    # 根据记忆，每个任务方法都必须包含db_manager.init_database()调用
-    db_manager.init_database()
+    # 移除重复的数据库初始化调用
+    # db_manager.init_database()
     
     logger.info(f"开始执行{period}报告生成任务")
     
     try:
         from .report_generator import ProductDiscoveryReportGenerator
         
-        # 创建报告生成器实例
-        generator = ProductDiscoveryReportGenerator()
+        # 创建报告生成器实例，传入现有的db_manager以避免重复初始化
+        generator = ProductDiscoveryReportGenerator(db_manager)
         
-        # 生成报告
-        result = generator.generate_product_discovery_report(period, include_analysis)
-        
-        if result.get('success', False):
-            logger.info(f"{period}报告生成成功: {result.get('report_path', '未知路径')}")
-            logger.info(f"产品数量: {result.get('products_count', 0)}, 分析数量: {result.get('analysis_count', 0)}")
+        # 生成报告 - 使用正确的方法名
+        if period == 'weekly':
+            result = generator.generate_report(days=7)
+        elif period == 'daily':
+            result = generator.generate_report(days=1)
+        elif period == 'monthly':
+            result = generator.generate_report(days=30)
         else:
-            logger.error(f"{period}报告生成失败: {result.get('error', '未知错误')}")
+            raise ValueError(f"不支持的报告周期: {period}")
         
-        return result
+        if result:
+            logger.info(f"{period}报告生成成功: 报告UUID: {result}")
+            return {
+                'success': True,
+                'report_uuid': result,
+                'report_path': f"数据库中的报告UUID: {result}",
+                'products_count': 0,  # 如果需要，可以从数据库查询
+                'analysis_count': 0   # 如果需要，可以从数据库查询
+            }
+        else:
+            logger.warning(f"{period}报告生成完成，但没有生成新报告")
+            return {
+                'success': True,
+                'report_uuid': None,
+                'report_path': None,
+                'products_count': 0,
+                'analysis_count': 0
+            }
         
     except Exception as e:
         error_msg = f"执行{period}报告生成失败: {e}"

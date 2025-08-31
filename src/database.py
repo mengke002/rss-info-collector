@@ -120,12 +120,14 @@ class DatabaseManager:
                 time_range VARCHAR(50),
                 product_count INT,
                 source_feed_count INT,
-                report_content_md TEXT,
+                report_content_md LONGTEXT,
                 metadata JSON,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
-        logger.info("`product_reports` 表已检查/创建。")
+        # 检查并更新现有表的字段类型
+        self._update_report_content_field('product_reports')
+        logger.debug("`product_reports` 表已检查/创建。")
 
     def _create_technews_reports_table(self):
         """创建科技新闻报告表"""
@@ -143,7 +145,7 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
-        logger.info("`technews_reports` 表已检查/创建。")
+        logger.debug("`technews_reports` 表已检查/创建。")
 
     def _create_insights_reports_table(self):
         """创建深度洞察报告表"""
@@ -160,7 +162,7 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
-        logger.info("`insights_reports` 表已检查/创建。")
+        logger.debug("`insights_reports` 表已检查/创建。")
 
     def _create_synthesis_reports_table(self):
         """创建综合洞察报告表"""
@@ -175,7 +177,39 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
-        logger.info("`synthesis_reports` 表已检查/创建。")
+        logger.debug("`synthesis_reports` 表已检查/创建。")
+
+    def _update_report_content_field(self, table_name: str, field_name: str = 'report_content_md'):
+        """更新报告表的内容字段类型为LONGTEXT（仅适用于product_reports表）"""
+        # 只对product_reports表进行字段类型更新
+        if table_name != 'product_reports':
+            return
+            
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # 检查字段当前类型
+                    cursor.execute(f"""
+                        SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s
+                    """, (self.db_config['database'], table_name, field_name))
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        data_type, max_length = result
+                        # 如果不是LONGTEXT，则更新
+                        if data_type.upper() != 'LONGTEXT':
+                            cursor.execute(f"""
+                                ALTER TABLE {table_name} 
+                                MODIFY COLUMN {field_name} LONGTEXT
+                            """)
+                            conn.commit()
+                            logger.info(f"已将 {table_name}.{field_name} 字段类型更新为 LONGTEXT")
+                        else:
+                            logger.debug(f"{table_name}.{field_name} 字段已经是 LONGTEXT 类型")
+        except Exception as e:
+            logger.error(f"更新 {table_name}.{field_name} 字段类型失败: {e}")
 
     def _update_table_schemas(self, cursor, conn):
         """更新表结构，添加新字段"""
@@ -429,9 +463,12 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX idx_source_feed (source_feed),
                     INDEX idx_created_at (created_at),
-                    INDEX idx_source_published_at (source_published_at)
+                    INDEX idx_source_published_at (source_published_at),
+                    INDEX idx_product_name (product_name),
+                    INDEX idx_product_url (product_url),
+                    UNIQUE KEY unique_product_source_date (product_name, source_feed, DATE(source_published_at))
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                COMMENT='统一产品库表 - 事件日志型表，记录每一次产品发现事件'
+                COMMENT='统一产品库表 - 事件日志型表，记录每一次产品发现事件，同一产品在同一来源同一天只记录一次'
             """,
 
             'articles': """
@@ -611,12 +648,13 @@ class DatabaseManager:
         # 由于使用上下文管理器，不需要显式关闭连接
         pass
     
-    def get_discovered_products(self, days: int = 7) -> List[Dict[str, Any]]:
+    def get_discovered_products(self, days: int = 7, deduplicate: bool = True) -> List[Dict[str, Any]]:
         """
         获取指定天数内发现的产品
         
         Args:
             days: 过去多少天内的数据
+            deduplicate: 是否进行智能去重
             
         Returns:
             产品列表
@@ -624,18 +662,152 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                    query = """
-                        SELECT * FROM discovered_products 
-                        WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
-                        ORDER BY created_at DESC
-                    """
+                    if deduplicate:
+                        # 智能去重：同一产品名称只保留最新的记录
+                        query = """
+                            SELECT dp1.* FROM discovered_products dp1
+                            INNER JOIN (
+                                SELECT product_name, MAX(created_at) as max_created_at
+                                FROM discovered_products 
+                                WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                                GROUP BY LOWER(TRIM(product_name))
+                            ) dp2 ON dp1.product_name = dp2.product_name 
+                                AND dp1.created_at = dp2.max_created_at
+                            ORDER BY dp1.created_at DESC
+                        """
+                    else:
+                        # 不去重，返回所有记录
+                        query = """
+                            SELECT * FROM discovered_products 
+                            WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                            ORDER BY created_at DESC
+                        """
+                    
                     cursor.execute(query, (days,))
                     results = cursor.fetchall()
-                    logger.info(f"获取到 {len(results)} 个产品 (过去 {days} 天)")
+                    logger.info(f"获取到 {len(results)} 个产品 (过去 {days} 天，去重: {deduplicate})")
                     return results
         except Exception as e:
             logger.error(f"获取产品数据失败: {e}")
             return []
+
+    def get_discovered_products_with_advanced_dedup(self, days: int = 7) -> List[Dict[str, Any]]:
+        """
+        获取指定天数内发现的产品，使用高级去重策略
+        
+        去重策略：
+        1. 同一产品名称（忽略大小写和空格）只保留一个
+        2. 优先保留有URL的记录
+        3. 在同等条件下保留最新的记录
+        
+        Args:
+            days: 过去多少天内的数据
+            
+        Returns:
+            去重后的产品列表
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                    query = """
+                        SELECT dp1.* FROM discovered_products dp1
+                        INNER JOIN (
+                            SELECT 
+                                LOWER(TRIM(product_name)) as normalized_name,
+                                MAX(
+                                    CASE 
+                                        WHEN product_url IS NOT NULL AND product_url != '' THEN created_at + INTERVAL 1 DAY
+                                        ELSE created_at 
+                                    END
+                                ) as priority_created_at
+                            FROM discovered_products 
+                            WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                            GROUP BY LOWER(TRIM(product_name))
+                        ) dp2 ON LOWER(TRIM(dp1.product_name)) = dp2.normalized_name 
+                            AND (
+                                (dp1.product_url IS NOT NULL AND dp1.product_url != '' AND dp1.created_at + INTERVAL 1 DAY = dp2.priority_created_at)
+                                OR (dp1.created_at = dp2.priority_created_at)
+                            )
+                        ORDER BY dp1.created_at DESC
+                    """
+                    
+                    cursor.execute(query, (days,))
+                    results = cursor.fetchall()
+                    logger.info(f"高级去重后获取到 {len(results)} 个唯一产品 (过去 {days} 天)")
+                    return results
+        except Exception as e:
+            logger.error(f"高级去重获取产品数据失败: {e}")
+            # 如果高级去重失败，回退到简单去重
+            return self.get_discovered_products(days, deduplicate=True)
+
+    def cleanup_duplicate_products(self, dry_run: bool = True) -> Dict[str, Any]:
+        """
+        清理重复的产品记录
+        
+        Args:
+            dry_run: 是否为试运行（只统计不删除）
+            
+        Returns:
+            清理结果统计
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                    # 查找重复的产品（基于产品名称，忽略大小写和前后空格）
+                    cursor.execute("""
+                        SELECT 
+                            LOWER(TRIM(product_name)) as normalized_name,
+                            COUNT(*) as count,
+                            GROUP_CONCAT(id ORDER BY created_at DESC) as ids
+                        FROM discovered_products 
+                        GROUP BY LOWER(TRIM(product_name))
+                        HAVING COUNT(*) > 1
+                        ORDER BY count DESC
+                    """)
+                    
+                    duplicates = cursor.fetchall()
+                    total_duplicates = sum(dup['count'] - 1 for dup in duplicates)
+                    
+                    if dry_run:
+                        logger.info(f"发现 {len(duplicates)} 组重复产品，共 {total_duplicates} 条重复记录")
+                        return {
+                            'success': True,
+                            'dry_run': True,
+                            'duplicate_groups': len(duplicates),
+                            'total_duplicates': total_duplicates,
+                            'duplicates': duplicates[:10]  # 返回前10组作为示例
+                        }
+                    
+                    # 实际删除重复记录（保留每组中最新的记录）
+                    deleted_count = 0
+                    for dup in duplicates:
+                        ids = dup['ids'].split(',')
+                        # 保留第一个ID（最新的），删除其他的
+                        ids_to_delete = ids[1:]
+                        if ids_to_delete:
+                            placeholders = ','.join(['%s'] * len(ids_to_delete))
+                            cursor.execute(f"""
+                                DELETE FROM discovered_products 
+                                WHERE id IN ({placeholders})
+                            """, ids_to_delete)
+                            deleted_count += cursor.rowcount
+                    
+                    conn.commit()
+                    logger.info(f"清理完成，删除了 {deleted_count} 条重复记录")
+                    
+                    return {
+                        'success': True,
+                        'dry_run': False,
+                        'duplicate_groups': len(duplicates),
+                        'deleted_count': deleted_count
+                    }
+                    
+        except Exception as e:
+            logger.error(f"清理重复产品失败: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     def get_articles_for_analysis(self, days: int = 7) -> List[Dict[str, Any]]:
         """
