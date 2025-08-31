@@ -1480,16 +1480,24 @@ class TechNewsAnalyzer:
                 # 解析JSON响应
                 import re
                 content = response['content'].strip()
+                insights_data = None
                 
-                # 尝试解析JSON
                 try:
                     # 方案1：找到JSON代码块
-                    json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', content, re.DOTALL)
+                    json_match = re.search(r'```(?:json)?\s*({{.*?}})\s*```', content, re.DOTALL)
                     if json_match:
-                        insights_data = json.loads(json_match.group(1))
+                        json_str = json_match.group(1)
+                        insights_data = json.loads(json_str)
                     else:
-                        # 方案2：直接解析
-                        insights_data = json.loads(content)
+                        # 方案2：如果找不到代码块，尝试从内容中提取最外层的大括号
+                        start_index = content.find('{')
+                        end_index = content.rfind('}')
+                        if start_index != -1 and end_index != -1:
+                            json_str = content[start_index:end_index+1]
+                            insights_data = json.loads(json_str)
+                        else:
+                            # 方案3：直接解析整个内容作为最后的尝试
+                            insights_data = json.loads(content)
                     
                     insights_data['generated_by'] = 'smart_model'
                     insights_data['confidence_score'] = 0.85  # 默认置信度
@@ -1498,7 +1506,14 @@ class TechNewsAnalyzer:
                     return insights_data
                     
                 except json.JSONDecodeError as e:
-                    logger.warning(f"无法解析LLM返回的JSON: {e}")
+                    logger.warning(f"无法解析LLM返回的JSON: {e}。尝试使用正则表达式托底方案。")
+                    insights_data = self._extract_insights_with_regex(content)
+                    if insights_data:
+                        insights_data['generated_by'] = 'regex_fallback'
+                        insights_data['confidence_score'] = 0.5 
+                        return insights_data
+                    
+                    logger.warning("正则表达式托底方案也失败了，将使用最终的模板托底方案。")
                     # 返回结构化的备用数据
                     return self._generate_fallback_insights(context_data)
             else:
@@ -1508,6 +1523,74 @@ class TechNewsAnalyzer:
         except Exception as e:
             logger.error(f"深度洞察生成失败: {e}")
             return self._generate_fallback_insights(context_data)
+
+    def _extract_insights_with_regex(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        使用正则表达式从文本中提取深度洞察信息，作为JSON解析失败的托底方案。
+        
+        Args:
+            content: LLM返回的原始字符串
+            
+        Returns:
+            提取的洞察字典，如果失败则返回None
+        """
+        import re
+        try:
+            patterns = {
+                "analyst_take": r'\\"analyst_take\\"\\s*:\\s*\\"([^\\\"]+)\\"',
+                "for_developers": r'\\"for_developers\\"\\s*:\\s*\\"([^\\\"]+)\\"',
+                "for_investors": r'\\"for_investors\\"\\s*:\\s*\\"([^\\\"]+)\\"',
+                "for_competitors": r'\\"for_competitors\\"\\s*:\\s*\\"([^\\\"]+)\\"',
+                "opportunity": r'\\"opportunity\\"\\s*:\\s*\\"([^\\\"]+)\\"',
+                "risk": r'\\"risk\\"\\s*:\\s*\\"([^\\\"]+)\\"',
+                "prediction": r'\\"prediction\\"\\s*:\\s*\\"([^\\\"]+)\\"'
+            }
+            
+            # 备用模式，处理没有转义引号的情况
+            alt_patterns = {
+                "analyst_take": r'"analyst_take"\s*:\s*"([^"]+)"',
+                "for_developers": r'"for_developers"\s*:\s*"([^"]+)"',
+                "for_investors": r'"for_investors"\s*:\s*"([^"]+)"',
+                "for_competitors": r'"for_competitors"\s*:\s*"([^"]+)"',
+                "opportunity": r'"opportunity"\s*:\s*"([^"]+)"',
+                "risk": r'"risk"\s*:\s*"([^"]+)"',
+                "prediction": r'"prediction"\s*:\s*"([^"]+)"'
+            }
+
+            extracted_data = {}
+            for key, pattern in patterns.items():
+                match = re.search(pattern, content, re.DOTALL)
+                if not match:
+                    # 如果带转义的模式找不到，尝试不带转义的
+                    match = re.search(alt_patterns[key], content, re.DOTALL)
+                extracted_data[key] = match.group(1).strip() if match else None
+
+            # 如果一个字段都提取不到，则认为失败
+            if not any(extracted_data.values()):
+                logger.warning("正则托底方案未能从文本中提取任何有效字段。")
+                return None
+
+            # 重建嵌套结构
+            insights = {
+                'analyst_take': extracted_data.get('analyst_take'),
+                'key_impacts': {
+                    'for_developers': extracted_data.get('for_developers'),
+                    'for_investors': extracted_data.get('for_investors'),
+                    'for_competitors': extracted_data.get('for_competitors')
+                },
+                'opportunity_and_risk': {
+                    'opportunity': extracted_data.get('opportunity'),
+                    'risk': extracted_data.get('risk')
+                },
+                'prediction': extracted_data.get('prediction')
+            }
+            
+            logger.info("成功通过正则表达式托底方案提取了部分或全部洞察信息。")
+            return insights
+            
+        except Exception as e:
+            logger.error(f"正则表达式托底方案在执行时发生异常: {e}")
+            return None
     
     def _generate_fallback_insights(self, context_data: Dict) -> Dict[str, Any]:
         """生成备用洞察（当LLM调用失败时）- 使用So What分析框架"""
