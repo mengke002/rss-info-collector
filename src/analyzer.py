@@ -688,23 +688,15 @@ class TechNewsAnalyzer:
                     else:
                         analysis_result = existing_analysis
                     
-                    # 验证分析结果的完整性
-                    required_fields = ['summary', 'key_info', 'tags']
+                    # 验证分析结果的完整性 - 新的JSON结构
+                    required_fields = ['summary', 'key_points', 'event_type', 'potential_impact']
                     if all(field in analysis_result for field in required_fields):
-                        # 验证tags结构
-                        tags = analysis_result.get('tags', {})
-                        if isinstance(tags, dict) and 'primary_tag' in tags:
-                            # 结果完整且有效，直接使用
-                            analysis_result['article_id'] = article_id
-                            analysis_result['source_feed'] = source_feed
-                            analysis_result['article_title'] = article.get('title')
-                            analysis_result['article_link'] = article.get('link')
-                            analysis_result['published_at'] = article.get('published_at')
-                            
-                            logger.debug(f"使用已缓存的完整分析结果 (文章ID: {article_id})")
-                            return analysis_result
-                        else:
-                            logger.debug(f"已存在的分析结果结构不完整 (文章ID: {article_id})，重新分析")
+                        # 结果完整且有效，直接使用
+                        analysis_result['article_id'] = article_id
+                        analysis_result['source_feed'] = source_feed
+                        
+                        logger.debug(f"使用已缓存的完整分析结果 (文章ID: {article_id})")
+                        return analysis_result
                     else:
                         logger.debug(f"已存在的分析结果缺少必要字段 (文章ID: {article_id})，重新分析")
                         
@@ -727,58 +719,29 @@ class TechNewsAnalyzer:
 
 **分析指南:**
 
-1. **生成摘要**: 用200字左右，提供包含文章核心信息的中立的中文摘要。
-2. **提取关键信息**: 识别并列出文章中的核心实体、数据或概念，例如公司、产品、人物、融资金额、技术术语等。
-3. **分配层级标签**: 从下方提供的 `<TAG_HIERARCHY>` 中，你必须选择一个 `primary_tag`，并可以一个或多个相关的 `secondary_tags`。标签必须准确反映文章的核心主题。
+1. **核心摘要**: 用200字左右，提供包含文章核心信息的中立、精炼的中文摘要。
+2. **关键信息点**: 识别并列出文章中的核心实体、数据或概念，例如公司、产品、人物、融资金额、技术术语、关键数据点等。
+3. **事件/主题分类**: 判断文章的核心事件或主题类型。
+4. **潜在影响评估**: 简要评估此事件可能带来的潜在影响。
 
 **输入文章:**
 {article_content}
 
-**上下文信息: 标签层级体系**
-<TAG_HIERARCHY>
-- **1. 产品与项目 (Product & Project)**
-    - `1.1. 新产品/项目发布 (New Launch)`: 对应 "Launch HN", "Show HN" 或 BetaList 上的新项目。
-    - `1.2. 项目更新/里程碑 (Project Update)`: 如 "我们刚刚达到 1000 个用户" 或 "2.0 版本发布"。
-    - `1.3. 项目经验/复盘 (Case Study)`: 如 "我如何通过...获得前100个用户" 或 "我们失败的经验教训"。
-    - `1.4. 求职/招聘 (Hiring)`: 如 "Ember (YC F24) Is Hiring Full Stack Engineer"。
-- **2. 公司与市场 (Corporate & Market)**
-    - `2.1. 融资与并购 (Funding & M&A)`: 包括融资、收购、IPO 等。
-    - `2.2. 公司战略/变动 (Strategy & Change)`: 大公司的战略调整、组织架构变动、财报发布。
-    - `2.3. 市场动态/法规 (Market & Regulation)`: 行业级别的政策变动、市场准入规则、重要报告等。
-- **3. 技术深度 (Technical Deep Dive)**
-    - `3.1. 技术教程/指南 (Tutorial & Guide)`: "如何用...实现..." 或 "...入门指南"。
-    - `3.2. 架构/原理分析 (Architecture & Principle)`: "深入理解..." 或 "...的设计原理"。
-    - `3.3. 开源库/工具介绍 (Library & Tool)`: 对某个具体开源项目或开发工具的介绍。
-- **4. 行业观察与观点 (Industry Insights & Opinion)**
-    - `4.1. 趋势分析/预测 (Trend Analysis)`: 对某个技术或市场方向的宏观分析和未来预测。
-    - `4.2. 个人观点/评论 (Opinion & Commentary)`: 对某个事件、技术或趋势的深度评论或思辨。
-    - `4.3. 科学研究/突破 (Scientific Research)`: 学术界或研究机构发布的重大科研成果。
-- **5. 安全与事件 (Security & Incidents)**
-    - `5.1. 安全漏洞/攻击 (Vulnerability & Attack)`: 如 "Comet AI browser can get prompt injected"。
-    - `5.2. 服务中断/故障 (Outage & Failure)`: 如 "Ask HN: GitHub Copilot down?"。
-    - `5.3. 法律/诉讼 (Legal & Lawsuit)`: 如 "Internet Access Providers Aren't Bound by DMCA Unmasking Subpoenas"。
-- **6. 社区与文化 (Community & Culture)**
-    - `6.1. 社区讨论 (Discussion)`: 如 "Ask HN: Best codebases to study?"。
-    - `6.2. 历史与怀旧 (History & Retro)`: 如 "Blast from the past: Facit A2400 terminal"。
-</TAG_HIERARCHY>
-
-**你的输出必须是一个单一、有效的JSON对象**，并严格遵循以下结构。所有内容值（如摘要、关键信息）都必须是**中文**：
-```json
+**你的输出必须是一个单一、有效的JSON对象**，并严格遵循以下结构。所有内容值都必须是**中文**：
 {{
+  "title": "{article.get('title', '')}",
+  "link": "{article.get('link', '')}",
+  "source": "{article.get('source_feed', '')}",
+  "published_at": "{article.get('published_at', '')}",
   "summary": "一段200字左右的中文文章摘要。",
-  "key_info": [
-    "关键信息一",
-    "关键信息二",
+  "key_points": [
+    "关键信息点一",
+    "关键信息点二",
     "..."
   ],
-  "tags": {{
-    "primary_tag": "从标签体系中选择的最相关的主标签 (例如: '产品与项目 (Product & Project)')",
-    "secondary_tags": [
-      "一个或多个相关的次级标签列表 (例如: '1.1. 新产品/项目发布 (New Launch)')"
-    ]
-  }}
+  "event_type": "从['产品发布', '公司战略', '技术突破', '市场动态', '融资并购', '安全事件', '行业观点']中选择一个",
+  "potential_impact": "对该事件潜在影响的简要说明 (50字以内)。"
 }}
-```
 """
             
             # 调用fast_model进行分析
@@ -810,23 +773,26 @@ class TechNewsAnalyzer:
                     logger.debug(f"整体内容JSON解析失败: {e}")
             
             if analysis_result:
-                # 添加文章元数据
-                analysis_result['article_id'] = article.get('id')
-                analysis_result['source_feed'] = article.get('source_feed')
-                analysis_result['article_title'] = article.get('title')
-                analysis_result['article_link'] = article.get('link')
-                analysis_result['published_at'] = article.get('published_at')
-                
-                # 立即保存到数据库，避免流程中断时丢失结果
-                try:
-                    self._save_analysis_result_to_db(article_id, source_feed, analysis_result)
-                    logger.debug(f"已立即保存分析结果到数据库 (文章ID: {article_id})")
-                except Exception as e:
-                    logger.warning(f"保存分析结果到数据库失败 (文章ID: {article_id}): {e}")
-                    # 不影响主流程，继续返回结果
-                
-                logger.debug(f"成功分析文章 {article.get('id')}: {article.get('title', '')[:50]}...")
-                return analysis_result
+                # 验证新的JSON结构
+                required_fields = ['summary', 'key_points', 'event_type', 'potential_impact']
+                if all(field in analysis_result for field in required_fields):
+                    # 添加文章元数据
+                    analysis_result['article_id'] = article.get('id')
+                    analysis_result['source_feed'] = article.get('source_feed')
+                    
+                    # 立即保存到数据库，避免流程中断时丢失结果
+                    try:
+                        self._save_analysis_result_to_db(article_id, source_feed, analysis_result)
+                        logger.debug(f"已立即保存分析结果到数据库 (文章ID: {article_id})")
+                    except Exception as e:
+                        logger.warning(f"保存分析结果到数据库失败 (文章ID: {article_id}): {e}")
+                        # 不影响主流程，继续返回结果
+                    
+                    logger.debug(f"成功分析文章 {article.get('id')}: {article.get('title', '')[:50]}...")
+                    return analysis_result
+                else:
+                    logger.warning(f"分析结果缺少必要字段 (文章ID: {article.get('id')})")
+                    return None
             else:
                 logger.warning(f"无法解析文章分析结果 (文章ID: {article.get('id')})")
                 return None
@@ -863,8 +829,9 @@ class TechNewsAnalyzer:
             # 移除元数据，只保存纯分析结果
             clean_result = {
                 'summary': analysis_result.get('summary'),
-                'key_info': analysis_result.get('key_info'),
-                'tags': analysis_result.get('tags'),
+                'key_points': analysis_result.get('key_points'),
+                'event_type': analysis_result.get('event_type'),
+                'potential_impact': analysis_result.get('potential_impact'),
                 'analyzed_at': datetime.now().isoformat()
             }
             
@@ -1016,13 +983,13 @@ class TechNewsAnalyzer:
 
     def run_tech_news_analysis(self, hours_back: int = 24) -> Dict[str, Any]:
         """
-        运行完整的科技新闻分析流程
+        运行完整的科技新闻分析流程（基于tech_news_report_plan.md优化的两层架构）
         
         Args:
             hours_back: 分析过去多少小时的新闻，默认24小时
             
         Returns:
-            完整的分析结果
+            包含完整Markdown报告的结果
         """
         logger.info(f"开始运行科技新闻分析 - 分析过去{hours_back}小时的新闻")
         
@@ -1035,10 +1002,10 @@ class TechNewsAnalyzer:
                 return {
                     'success': False,
                     'message': '没有找到符合条件的文章',
-                    'analysis_results': []
+                    'full_report': None
                 }
             
-            # 2. 批量分析文章（层次一）- 每个结果会立即保存到数据库
+            # 2. 第一层：并行调用 analyze_single_article，得到结构化数据列表
             analysis_results = self.batch_analyze_articles(articles)
             
             if not analysis_results:
@@ -1046,24 +1013,31 @@ class TechNewsAnalyzer:
                 return {
                     'success': False,
                     'message': '文章分析未产生有效结果',
-                    'analysis_results': []
+                    'full_report': None
                 }
             
-            # 3. 生成综合洞察（层次三）
-            comprehensive_insights = self.generate_comprehensive_insights(analysis_results, f'过去{hours_back}小时')
+            # 3. 第二层：调用新的报告生成方法，生成完整的Markdown报告
+            full_report_md = self.generate_full_report(analysis_results, hours_back)
             
-            # 4. 构建最终结果（所有结果已经在分析过程中保存）
+            if not full_report_md:
+                logger.warning("生成完整报告失败")
+                return {
+                    'success': False,
+                    'message': '生成完整报告失败',
+                    'full_report': None
+                }
+            
+            # 4. 构建最终结果
             final_result = {
                 'success': True,
                 'analysis_period': f'过去{hours_back}小时',
                 'total_articles_found': len(articles),
                 'successful_analysis_count': len(analysis_results),
-                'analysis_results': analysis_results,
-                'comprehensive_insights': comprehensive_insights,
+                'full_report': full_report_md,
                 'generated_at': datetime.now().isoformat()
             }
             
-            logger.info(f"科技新闻分析完成 - 分析 {len(articles)} 篇文章，成功 {len(analysis_results)} 篇，结果已全部保存，生成综合洞察")
+            logger.info(f"科技新闻分析完成 - 分析 {len(articles)} 篇文章，成功 {len(analysis_results)} 篇，已生成完整报告")
             return final_result
             
         except Exception as e:
@@ -1071,8 +1045,123 @@ class TechNewsAnalyzer:
             return {
                 'success': False,
                 'message': f'分析过程中出现错误: {str(e)}',
-                'analysis_results': []
+                'full_report': None
             }
+
+    def generate_full_report(self, analysis_results: List[Dict[str, Any]], hours_back: int = 24) -> Optional[str]:
+        """
+        第二层LLM：综合分析与报告生成
+        基于第一层分析的结构化数据，生成完整的Markdown报告
+        
+        Args:
+            analysis_results: 第一层分析的结果列表
+            hours_back: 分析时间范围（小时）
+            
+        Returns:
+            完整的Markdown报告字符串，如果失败则返回None
+        """
+        if not analysis_results:
+            logger.warning("没有分析结果，无法生成报告")
+            return None
+        
+        try:
+            # 将analysis_results转换为JSON字符串，用于传递给LLM
+            structured_data = []
+            for result in analysis_results:
+                structured_data.append({
+                    "title": result.get('title', ''),
+                    "link": result.get('link', ''),
+                    "source": result.get('source', ''),
+                    "summary": result.get('summary', ''),
+                    "key_points": result.get('key_points', []),
+                    "event_type": result.get('event_type', ''),
+                    "potential_impact": result.get('potential_impact', '')
+                })
+            
+            # 构建当前日期
+            from datetime import datetime
+            current_date = datetime.now().strftime('%Y-%m-%d')
+            
+            # 构建第二层LLM的Prompt
+            prompt = f"""
+你是一位资深的科技行业分析师和报告撰写专家，任职于顶尖的分析机构。你的任务是基于提供的一系列科技新闻的结构化信息，撰写一份全面、深入、结构清晰的洞察报告。
+
+报告需要遵循"由浅入深，由事实到洞察"的原则，整合所有信息，最终输出一份完整的Markdown文档。
+
+[输入数据]
+你将收到一个JSON数组，其中包含过去{hours_back}小时内多篇科技新闻的核心信息。格式如下：
+
+{json.dumps(structured_data, ensure_ascii=False, indent=2)}
+
+[你的任务]
+请严格按照以下Markdown结构和要求，生成你的分析报告。
+
+# 科技新闻洞察报告 ({current_date})
+
+> 核心提要: (在这里写一段高度浓缩的、吸引人的导语，约100-150字。点明本次报告期内最重要的趋势、最值得关注的事件，并抛出核心观点。例如："本期科技界风起云涌，AI领域的军备竞赛进入新阶段，而资本市场则对XX赛道展现出前所未有的热情。本报告将为您深度解读这些表象之下的战略意图与未来机遇。")
+
+## 一、关键新闻速览 (Facts First)
+
+(此部分汇总所有输入文章的核心事实，以清晰的列表或表格呈现，让读者快速了解发生了什么。)
+
+### 1.1 产品与发布
+ * [产品/公司A]: 摘要内容...] ([来源](链接))
+ * [产品/公司B]: 摘要内容...] ([来源](链接))
+
+### 1.2 资本与市场
+ * [公司C]: 摘要内容...] ([来源](链接))
+
+### 1.3 技术与趋势
+ * [技术D]: 摘要内容...] ([来源](链接))
+
+(请根据输入数据的event_type对文章进行分类，如果某个分类下没有文章，则不显示该标题。)
+
+## 二、趋势与模式分析 (Connecting the Dots)
+
+(此部分是分析的中间层，需要你连接不同新闻之间的点，发现其中的模式和趋势。)
+
+ * **热点聚焦**: (分析本期新闻中出现频率最高的key_points，识别出当前市场的热点。例如："'多模态大模型'和'端侧AI'成为本期最热门的关键词，在多篇文章中被反复提及，显示出业界对下一代AI形态的集体探索。")
+ * **模式识别**: (观察不同event_type之间的关联。例如："我们观察到，在'技术突破'类新闻发布后，紧接着出现了相关的'融资并购'事件，这表明技术创新正被资本市场快速验证和吸收。")
+ * **信号解读**: (发现一些值得注意的微弱信号。例如："尽管主流讨论集中在大型科技公司，但来自某个小众来源的一篇文章揭示了一个新兴的、可能被市场忽略的细分赛道。")
+
+## 三、深度洞察与解读 (The "So What?")
+
+(这是报告的核心，需要你提供最深刻的洞察，回答"So What?"和"What's Next?"。)
+
+### 3.1 对开发者的影响
+(例如："对于开发者而言，XX技术的成熟意味着新的工具链和开发范式即将到来，现在是学习和掌握这些技能的最佳时机...")
+
+### 3.2 对投资者的启示
+(例如："XX领域的投资窗口依然敞开，但竞争格局已趋于激烈。我们的分析表明，成功的关键在于找到能够与现有生态系统深度结合的差异化应用，而非底层技术的重复构建...")
+
+### 3.3 对行业格局的预判
+(例如："基于本期的数据，我们预测未来6个月内，XX行业将出现一波整合浪潮。领先企业可能会通过收购来弥补其技术短板，而小型创新公司则面临站队或被淘汰的压力...")
+
+---
+报告基于对 {len(structured_data)} 篇文章的分析生成。
+
+请确保报告内容具有前瞻性、洞察性，避免简单的事实罗列，要有深度思考和独到见解。
+"""
+            
+            # 调用smart_model生成报告
+            response = call_llm(prompt, model_type='smart')
+            
+            if not response.get('success', False):
+                logger.error(f"生成完整报告失败: {response.get('error', 'Unknown error')}")
+                return None
+            
+            full_report = response.get('content', '').strip()
+            
+            if not full_report:
+                logger.warning("LLM返回了空的报告内容")
+                return None
+            
+            logger.info(f"成功生成完整报告，长度: {len(full_report)} 字符")
+            return full_report
+            
+        except Exception as e:
+            logger.error(f"生成完整报告时出现异常: {e}")
+            return None
     
     def generate_comprehensive_insights(self, analysis_results: List[Dict[str, Any]], 
                                       time_period: str = "过去24小时") -> Dict[str, Any]:
@@ -1234,6 +1323,20 @@ class TechNewsAnalyzer:
                         # 清理和标准化关键信息
                         clean_info = info.strip()
                         if len(clean_info) > 2:  # 过滤太短的信息
+                            all_key_info.append(clean_info)
+                            key_info_frequency[clean_info] = key_info_frequency.get(clean_info, 0) + 1
+                            
+                            # 记录文章信息
+                            if clean_info not in key_info_articles:
+                                key_info_articles[clean_info] = []
+                            key_info_articles[clean_info].append({
+                                'article_id': article_id,
+                                'title': article_title[:80] + '...' if len(article_title) > 80 else article_title
+                            })
+                    elif info and isinstance(info, dict) and 'info' in info:
+                        # 处理字典格式的关键信息（向后兼容）
+                        clean_info = info.get('info', '').strip()
+                        if len(clean_info) > 2:
                             all_key_info.append(clean_info)
                             key_info_frequency[clean_info] = key_info_frequency.get(clean_info, 0) + 1
                             
@@ -1431,6 +1534,9 @@ class TechNewsAnalyzer:
             深度洞察结果
         """
         try:
+            # 获取原始分析结果以提取更丰富的内容
+            analysis_results = getattr(self, '_current_analysis_results', [])
+            
             # 构建给LLM的上下文数据
             context_data = {
                 'time_period': time_period,
@@ -1441,6 +1547,42 @@ class TechNewsAnalyzer:
                 'source_insights': source_analysis.get('cross_source_insights', [])
             }
             
+            # 从原始分析结果中提取文章内容摘要，按文章合并结构体
+            article_contents = []
+            
+            for result in analysis_results:  # 不限制文章数量
+                article_data = {
+                    'title': result.get('article_title', '未知标题'),
+                    'source': result.get('source_feed', '未知来源'),
+                    'summary': result.get('summary', ''),
+                    'key_info': [],
+                    'primary_tag': '',
+                    'secondary_tags': []
+                }
+                
+                # 处理关键信息
+                if result.get('key_info'):
+                    for info in result.get('key_info', []):
+                        if isinstance(info, str):
+                            # 字符串格式的关键信息
+                            article_data['key_info'].append(info)
+                        elif isinstance(info, dict) and 'info' in info:
+                            # 字典格式的关键信息（向后兼容）
+                            article_data['key_info'].append(info.get('info', ''))
+                
+                # 处理标签
+                if result.get('tags'):
+                    tags = result.get('tags', {})
+                    article_data['primary_tag'] = tags.get('primary_tag', '未知')
+                    article_data['secondary_tags'] = tags.get('secondary_tags', [])
+                
+                # 只有当文章有有效内容时才添加
+                if article_data['summary'] or article_data['key_info']:
+                    article_contents.append(article_data)
+            
+            # 将合并后的文章内容添加到上下文
+            context_data['article_contents'] = article_contents
+
             # 构建专业的prompt，严格按照项目规划文档的"So What?"分析框架
             prompt = f"""
 你是一位在 a16z (Andreessen Horowitz) 工作的资深科技分析师，以能从新闻中发现别人看不到的趋势和机会而闻名。
@@ -1453,6 +1595,23 @@ class TechNewsAnalyzer:
    - 主要主题: {', '.join(context_data['top_topics'])}
    - 热门实体: {', '.join(context_data['hot_entities'])}
    - 趋势话题: {', '.join(context_data['trending_topics'])}
+
+2. **文章详细内容**（共{len(context_data['article_contents'])}篇）:
+"""
+            
+            # 添加合并后的文章内容
+            for i, article in enumerate(context_data['article_contents'], 1):
+                key_info_str = '; '.join(article['key_info']) if article['key_info'] else '无'
+                secondary_tags_str = ', '.join(article['secondary_tags']) if article['secondary_tags'] else '无'
+                
+                prompt += f"""   {i}. [{article['source']}] {article['title']}
+      摘要: {article['summary']}
+      关键信息: {key_info_str}
+      标签: {article['primary_tag']} ({secondary_tags_str})
+
+"""
+            
+            prompt += f"""
 
 **[你的任务]**
 请严格按照以下JSON格式输出你的分析，确保每个字段都经过深思熟虑，并体现你的专业性：
@@ -1475,7 +1634,7 @@ class TechNewsAnalyzer:
             # 调用smart_model
             from .llm_client import call_llm
             response = call_llm(prompt, model_type='smart')
-            
+
             if response.get('success', False):
                 # 解析JSON响应
                 import re
@@ -1626,6 +1785,9 @@ class TechNewsAnalyzer:
         logger.info(f"开始生成综合洞察 - 分析 {len(analysis_results)} 篇文章的数据")
         
         try:
+            # 保存原始分析结果，供_generate_deep_insights使用
+            self._current_analysis_results = analysis_results
+            
             # 1. 统计分析
             statistics = self._analyze_article_statistics(analysis_results)
             
@@ -1738,7 +1900,7 @@ class CommunityDeepAnalyzer:
 
 1.  **事实层 (Factual Layer)**: 客观地提取文章明确提到的信息。
     *   `article_type`: 判断文章类型，从 ['经验分享', '案例研究', '技术教程', '观点讨论', '产品发布', '问答'] 中选择一个最贴切的。
-    *   `summary`: 用2-3句话总结文章的核心内容。
+    *   `summary`: 用200字左右总结文章的核心内容。
     *   `key_entities`: 提取文章中提到的关键实体，如产品名、公司名、技术栈、关键人物等。
 
 2.  **观察层 (Observational Layer)**: 提炼作者的核心观点和可直接复用的信息。

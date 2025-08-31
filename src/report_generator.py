@@ -113,63 +113,82 @@ class TechNewsReportGenerator:
 
         return "\n".join(markdown_parts)
 
-    def generate_report(self, analysis_results: Dict[str, Any], time_range_str: str):
+    def generate_report(self, full_report_md: str, article_count: int, time_range_str: str = "过去24小时") -> Dict[str, Any]:
         """
-        生成完整的周报，并将其存入数据库。
+        简化的报告生成方法：接收已生成的Markdown报告并存入数据库
+        
+        Args:
+            full_report_md: 已经生成好的完整Markdown报告
+            article_count: 分析的文章总数
+            time_range_str: 时间范围描述
+            
+        Returns:
+            生成结果
         """
-        logger.info("开始生成科技新闻周报...")
+        logger.info("开始将生成的科技新闻报告存入数据库...")
         
-        report_uuid = str(uuid.uuid4())
-        beijing_time = self.get_beijing_time()
-        report_date = beijing_time.date()
-
-        comprehensive_insights = analysis_results.get('comprehensive_insights', {})
-        deep_insights = comprehensive_insights.get('insights', {}).get('deep_insights', {})
-        key_info_analysis = comprehensive_insights.get('insights', {}).get('key_info_analysis', {})
-
-        # 构建报告的各个部分
-        layer1 = self._build_layer1_insight(deep_insights)
-        layer2 = self._build_layer2_findings(key_info_analysis)
-        layer3 = self._build_layer3_analysis_data(analysis_results)
-        
-        # 组合成完整的Markdown报告
-        report_title = f"# 科技新闻周报 ({report_date.strftime('%Y-%m-%d')})"
-        full_report_md = f"{report_title}\n\n{layer1}\n{layer2}\n{layer3}"
-
-        # 准备存入数据库的数据
-        article_count = analysis_results.get('total_articles', 0)
-        
-        topic_distribution = comprehensive_insights.get('insights', {}).get('topic_analysis', {}).get('topic_distribution', [])
-        main_topics = [topic['topic'] for topic in topic_distribution[:5]] # 取前5个主要主题
-
-        metadata = {
-            "total_articles_analyzed": article_count,
-            "llm_analysis_summary": deep_insights,
-            "key_info_analysis": key_info_analysis,
-            "topic_analysis": comprehensive_insights.get('insights', {}).get('topic_analysis', {}),
-            "emerging_tech_analysis": comprehensive_insights.get('insights', {}).get('emerging_tech_analysis', {})
-        }
-
-        report_data = {
-            "report_uuid": report_uuid,
-            "generated_at": beijing_time,
-            "report_date": report_date,
-            "time_range": time_range_str,
-            "article_count": article_count,
-            "main_topics": main_topics,
-            "report_content_md": full_report_md,
-            "metadata": metadata
-        }
-
         try:
-            self.db_manager.save_technews_report(report_data)
-            logger.info(f"科技新闻报告 {report_uuid} 已成功存入数据库。")
-        except Exception as e:
-            logger.error(f"保存科技新闻报告到数据库时失败: {e}", exc_info=True)
-            # 即使数据库保存失败，也保留文件备份
-            self._save_report_as_backup_file(report_uuid, full_report_md, "technews")
+            report_uuid = str(uuid.uuid4())
+            beijing_time = self.get_beijing_time()
+            report_date = beijing_time.date()
 
-        return report_uuid
+            # 简化的元数据
+            metadata = {
+                "total_articles_analyzed": article_count,
+                "time_range": time_range_str,
+                "generation_method": "two_layer_llm",
+                "generated_at": beijing_time.isoformat()
+            }
+
+            # 将报告存入数据库
+            try:
+                with self.db_manager.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        insert_sql = """
+                            INSERT INTO technews_reports (
+                                report_uuid, generated_at, report_date, 
+                                time_range, article_count, main_topics, 
+                                report_content_md, metadata
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """
+                        
+                        cursor.execute(insert_sql, (
+                            report_uuid,
+                            beijing_time,
+                            report_date,
+                            time_range_str,
+                            article_count,
+                            json.dumps([], ensure_ascii=False),  # 主题信息可以从内容中提取
+                            full_report_md,
+                            json.dumps(metadata, ensure_ascii=False)
+                        ))
+                        
+                        conn.commit()
+                        logger.info(f"报告已成功存入数据库 - UUID: {report_uuid}")
+                        
+            except Exception as e:
+                logger.error(f"存储报告到数据库失败: {e}")
+                return {
+                    'success': False,
+                    'error': f'数据库存储失败: {str(e)}',
+                    'report_uuid': None
+                }
+
+            return {
+                'success': True,
+                'report_uuid': report_uuid,
+                'report_date': report_date.isoformat(),
+                'article_count': article_count,
+                'message': f'科技新闻报告生成完成，基于{article_count}篇文章的分析'
+            }
+            
+        except Exception as e:
+            logger.error(f"生成报告失败: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'report_uuid': None
+            }
 
     def _save_report_as_backup_file(self, report_uuid: str, content: str, report_type: str):
         """在数据库保存失败时，将报告保存为本地文件作为备份。"""

@@ -502,7 +502,7 @@ def run_community_analysis_task(db_manager: DatabaseManager, days_back: int = 7)
 
 def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back: int = 24) -> Dict[str, Any]:
     """
-    执行科技新闻分析与报告生成集成任务
+    执行科技新闻分析与报告生成集成任务（基于新的两层架构）
 
     Args:
         db_manager: 数据库管理器
@@ -513,21 +513,39 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
     """
     logger.info(f"开始执行科技新闻分析与报告生成集成任务 - {hours_back}小时")
 
-    # 1. 执行分析任务
-    analysis_result = run_tech_news_analysis_task(db_manager, hours_back)
-
-    if not analysis_result.get('success'):
-        logger.error("分析步骤失败，报告生成中止。")
-        return analysis_result
-
-    # 2. 执行报告生成任务
     try:
-        from .report_generator import generate_tech_news_report
+        # 1. 使用TechNewsAnalyzer的新架构进行分析
+        from .analyzer import TechNewsAnalyzer
+        
+        analyzer = TechNewsAnalyzer(db_manager)
+        analysis_result = analyzer.run_tech_news_analysis(hours_back)
+
+        if not analysis_result.get('success'):
+            logger.error("分析步骤失败，报告生成中止。")
+            return analysis_result
+
+        # 2. 从分析结果中获取已生成的完整报告
+        full_report_md = analysis_result.get('full_report')
+        if not full_report_md:
+            logger.error("分析结果中没有完整报告")
+            return {
+                'success': False,
+                'error': '分析结果中没有完整报告'
+            }
+
+        # 3. 使用TechNewsReportGenerator保存报告到数据库
+        from .report_generator import TechNewsReportGenerator
+        
+        generator = TechNewsReportGenerator()
+        article_count = analysis_result.get('successful_analysis_count', 0)
         time_range_str = f"过去{hours_back}小时"
-        report_result = generate_tech_news_report(analysis_result, time_range_str)
+        
+        report_result = generator.generate_report(full_report_md, article_count, time_range_str)
         
         if report_result.get('success'):
-            logger.info(f"科技新闻报告生成成功: {report_result.get('report_path')}")
+            logger.info(f"科技新闻报告生成成功: UUID {report_result.get('report_uuid')}")
+            # 将完整报告内容添加到返回结果中
+            report_result['full_report'] = full_report_md
         else:
             logger.error(f"报告生成失败: {report_result.get('error')}")
 
