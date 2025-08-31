@@ -105,8 +105,8 @@ def main():
                        help='删除并重新创建所有RSS表')
     parser.add_argument('--feed', type=str,
                        help='只爬取指定的RSS源')
-    parser.add_argument('--batch-size', type=int, default=50,
-                       help='分析任务的批处理大小（默认：50）')
+    parser.add_argument('--batch-size', type=int, default=500,
+                       help='分析任务的批处理大小（默认：500）')
     parser.add_argument('--report-period', choices=['daily', 'weekly', 'monthly'], default='daily',
                        help='报告周期（默认：daily）')
     parser.add_argument('--no-analysis', action='store_true',
