@@ -113,7 +113,7 @@ class TechNewsReportGenerator:
 
         return "\n".join(markdown_parts)
 
-    def generate_weekly_report(self, analysis_results: Dict[str, Any], time_range_str: str):
+    def generate_report(self, analysis_results: Dict[str, Any], time_range_str: str):
         """
         生成完整的周报，并将其存入数据库。
         """
@@ -360,7 +360,7 @@ class InsightsReportGenerator:
         
         # 生成科技新闻周报
         if period == 'weekly':
-            report_uuid = self.tech_news_generator.generate_weekly_report(analysis_results, "本周")
+            report_uuid = self.tech_news_generator.generate_report(analysis_results, "本周")
         else:
             logger.warning("当前仅支持周报的综合洞察报告生成")
             return {"success": False, "message": "仅支持周报的综合洞察报告生成"}
