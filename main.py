@@ -81,7 +81,7 @@ def run_tech_news_report_task():
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='RSS数据采集系统')
-    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'analyze', 'report', 'tech_news_report', 'full', 'report_product', 'report_tech_news', 'community_analysis', 'community_report', 'community_full'],
+    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'analyze', 'report', 'tech_news_report', 'full', 'report_product', 'report_tech_news', 'product_report_daily', 'product_report_weekly', 'community_analysis', 'community_report', 'community_full'],
                        default='crawl', help='要执行的任务类型')
     parser.add_argument('--retention-days', type=int, 
                        help='数据保留天数（仅用于cleanup任务）')
@@ -132,12 +132,12 @@ def main():
         result = run_tech_news_report_generation_task(db_manager, args.hours_back)
     elif args.task == 'full':
         result = run_full_maintenance(db_manager)
-    elif task == 'product_report_daily':
+    elif args.task == 'product_report_daily':
         logger.info("触发产品发现报告生成任务(每日)")
-        result = run_product_report_task(days=1)
-    elif task == 'product_report_weekly':
+        result = run_report_generation_task(db_manager, 'daily', True)
+    elif args.task == 'product_report_weekly':
         logger.info("触发产品发现报告生成任务(每周)")
-        result = run_product_report_task(days=7)
+        result = run_report_generation_task(db_manager, 'weekly', True)
     elif args.task == 'report_tech_news':
         run_tech_news_report_task()
     elif args.task == 'community_analysis':

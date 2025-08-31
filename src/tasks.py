@@ -393,7 +393,7 @@ def run_report_generation_task(db_manager: DatabaseManager, period: str = 'daily
         from .report_generator import ProductDiscoveryReportGenerator
         
         # 创建报告生成器实例
-        generator = ProductDiscoveryReportGenerator(db_manager)
+        generator = ProductDiscoveryReportGenerator()
         
         # 生成报告
         result = generator.generate_product_discovery_report(period, include_analysis)
