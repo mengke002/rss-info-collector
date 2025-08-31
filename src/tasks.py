@@ -12,23 +12,6 @@ from .logger import logger
 from .database import DatabaseManager
 
 
-def _get_existing_decohack_data_for_today(db_manager: DatabaseManager) -> set:
-    """获取今天已经存在的Decohack产品数据"""
-    try:
-        today = date.today()
-        with db_manager.get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT CONCAT(product_name, '_', crawl_date) as product_key
-                    FROM rss_decohack_products 
-                    WHERE crawl_date = %s
-                """, (today,))
-                return {row[0] for row in cursor.fetchall()}
-    except Exception as e:
-        logger.error(f"获取今天已存在的Decohack数据失败: {e}")
-        return set()
-
-
 def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> List[Dict[str, Any]]:
     table_columns = {
         'rss_ycombinator': ['title', 'link', 'guid', 'full_content', 'content_fetched_at', 'published_at', 'updated_at'],
@@ -167,40 +150,44 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
                 table_name = f"rss_{feed_name}"
                 feed_type = feed_name
 
-            # 获取已存在的数据用于去重
-            if 'decohack' in feed_name:
-                # 对于decohack，检查今天是否已经爬取过
-                existing_items = _get_existing_decohack_data_for_today(db_manager)
-            else:
-                existing_guids = db_manager.get_existing_guids(table_name)
-
             # 解析RSS
             items = rss_parser.parse_feed(feed_config)
+            
+            # 对于decohack，特殊处理
+            if 'decohack' in feed_name:
+                all_products = []
+                for item in items:
+                    if item.get('is_decohack_source') and item.get('full_content_html'):
+                        products = rss_parser.parse_decohack_products(
+                            item['full_content_html'], 
+                            date.today()  # crawl_date 仍然传递，但不再用于去重
+                        )
+                        if products:
+                            all_products.extend(products)
+                
+                logger.info(f"Decohack解析到 {len(all_products)} 个产品，准备入库...")
+                
+                # 规范化并直接批量插入，由数据库处理去重
+                if all_products:
+                    final_products = _normalize_items_for_db(all_products, table_name)
+                    inserted_count = db_manager.batch_insert_decohack_products(final_products)
+                    results['items_inserted'] += inserted_count
+                
+                results['feeds_processed'] += 1
+                continue # 处理完decohack后跳过后续通用逻辑
+
+            # --- 以下为其他RSS源的通用处理逻辑 ---
+
+            # 获取已存在的数据用于去重
+            existing_guids = db_manager.get_existing_guids(table_name)
 
             # 过滤新条目并添加feed_type
             new_items = []
-            if 'decohack' in feed_name:
-                # 特殊处理Decohack：解析产品详情并去重
-                for item in items:
-                    if item.get('is_decohack_source') and item.get('full_content_html'):
-                        # 解析产品详情
-                        today = date.today()
-                        products = rss_parser.parse_decohack_products(
-                            item['full_content_html'], 
-                            today
-                        )
-                        
-                        # 过滤今天已经存在的产品
-                        for product in products:
-                            product_key = f"{product['product_name']}_{today}"
-                            if product_key not in existing_items:
-                                new_items.append(product)
-            else:
-                for item in items:
-                    if item['guid'] not in existing_guids:
-                        if feed_type:
-                            item['feed_type'] = feed_type
-                        new_items.append(item)
+            for item in items:
+                if item['guid'] not in existing_guids:
+                    if feed_type:
+                        item['feed_type'] = feed_type
+                    new_items.append(item)
 
             if feed_name == 'ycombinator' and new_items:
                 logger.info(f"开始为 ycombinator 的 {len(new_items)} 个新条目增强内容...")
@@ -214,10 +201,6 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
             elif 'ezindie' in feed_name and new_items:
                logger.info(f"开始为 ezindie 的 {len(new_items)} 个新条目增强内容...")
                enhanced_items = asyncio.run(content_enhancer.enhance_items(new_items, 'ezindie'))
-            elif 'decohack' in feed_name and new_items:
-               # decohack 产品数据已经解析完成，直接使用
-               logger.info(f"Decohack解析到 {len(new_items)} 个新产品")
-               enhanced_items = new_items
             else:
                 for item in new_items:
                     if 'full_content' not in item:

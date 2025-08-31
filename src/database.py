@@ -403,11 +403,10 @@ class DatabaseManager:
                     is_featured BOOLEAN DEFAULT FALSE COMMENT '是否精选',
                     keywords VARCHAR(300) COMMENT '产品关键词',
                     ph_publish_date DATE COMMENT 'PH发布日期',
-                    crawl_date DATE NOT NULL COMMENT '抓取日期(用于去重)',
+                    crawl_date DATE NOT NULL COMMENT '抓取日期',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_product_date (product_name, crawl_date) COMMENT '产品名称+抓取日期唯一',
-                    INDEX idx_crawl_date (crawl_date),
+                    UNIQUE KEY unique_product_ph_date (product_name, ph_publish_date) COMMENT '产品名称+PH发布日期唯一，实现精准去重',
                     INDEX idx_ph_publish (ph_publish_date),
                     INDEX idx_featured (is_featured),
                     INDEX idx_votes (vote_count DESC)
@@ -501,6 +500,36 @@ class DatabaseManager:
                     return inserted_count
         except Exception as e:
             logger.error(f"批量插入数据失败: {e}")
+            return 0
+
+    def batch_insert_decohack_products(self, products_data: List[Dict[str, Any]]) -> int:
+        """批量插入Decohack产品，使用INSERT IGNORE去重"""
+        if not products_data:
+            return 0
+        
+        # 确保所有字典的键顺序一致
+        columns = list(products_data[0].keys())
+        columns_sql = ', '.join(f"`{c}`" for c in columns)
+        placeholders = ', '.join(['%s'] * len(columns))
+        
+        sql = f"""
+            INSERT IGNORE INTO rss_decohack_products ({columns_sql})
+            VALUES ({placeholders})
+        """
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # 将字典列表转换为元组列表
+                    values_list = [tuple(item.get(col) for col in columns) for item in products_data]
+                    
+                    cursor.executemany(sql, values_list)
+                    conn.commit()
+                    inserted_count = cursor.rowcount
+                    logger.info(f"批量插入 Decohack 产品: {inserted_count} 条新记录被插入")
+                    return inserted_count
+        except Exception as e:
+            logger.error(f"批量插入 Decohack 产品数据失败: {e}")
             return 0
     
     def get_existing_guids(self, table_name: str) -> set:
