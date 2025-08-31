@@ -74,6 +74,8 @@ jobs:
       run: python main.py --task crawl
 
     - name: Run analyzer
+      # 定时任务时总是执行分析，手动触发时只有选择analyze才执行
+      if: github.event_name == 'schedule' || github.event.inputs.task == 'analyze'
       run: python main.py --task analyze
 
   tech_news_report:
