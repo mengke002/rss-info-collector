@@ -390,15 +390,28 @@ def generate_product_discovery_report(db_manager: DatabaseManager, period: str =
     generator = ProductDiscoveryReportGenerator()
     return generator.generate_report(period, include_analysis)
 
-def generate_tech_news_report(analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+def generate_tech_news_report(analysis_results: Dict[str, Any], time_range_str: str) -> Dict[str, Any]:
     """
     便捷函数：生成科技新闻分析报告
     
     Args:
         analysis_results: 来自TechNewsAnalyzer的完整分析结果
+        time_range_str: 时间范围描述字符串
         
     Returns:
         报告生成结果
     """
     generator = TechNewsReportGenerator()
-    return generator.generate_report(analysis_results)
+    report_uuid = generator.generate_report(analysis_results, time_range_str)
+    
+    if report_uuid:
+        return {
+            'success': True,
+            'report_uuid': report_uuid,
+            'report_path': f"数据库中的报告UUID: {report_uuid}" # 示例路径
+        }
+    else:
+        return {
+            'success': False,
+            'error': '报告生成失败，未能获取报告UUID'
+        }

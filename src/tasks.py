@@ -523,7 +523,8 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
     # 2. 执行报告生成任务
     try:
         from .report_generator import generate_tech_news_report
-        report_result = generate_tech_news_report(analysis_result)
+        time_range_str = f"过去{hours_back}小时"
+        report_result = generate_tech_news_report(analysis_result, time_range_str)
         
         if report_result.get('success'):
             logger.info(f"科技新闻报告生成成功: {report_result.get('report_path')}")
