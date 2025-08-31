@@ -344,3 +344,357 @@ def _get_indiehackers_stats_by_type(db_manager: DatabaseManager) -> Dict[str, An
     except Exception as e:
         logger.error(f"获取indiehackers分类统计失败: {e}")
         return {}
+
+
+def run_product_discovery_analysis(db_manager: DatabaseManager, batch_size: int = 50) -> Dict[str, Any]:
+    """
+    执行产品发现分析任务
+    
+    Args:
+        db_manager: 数据库管理器
+        batch_size: 每批处理的数量
+        
+    Returns:
+        分析结果
+    """
+    # 根据记忆，每个任务方法都必须包含db_manager.init_database()调用
+    db_manager.init_database()
+    
+    logger.info("开始执行产品发现分析任务")
+    
+    try:
+        from .analyzer import DataAnalyzer
+        
+        # 创建分析器实例
+        analyzer = DataAnalyzer(db_manager)
+        
+        # 运行产品发现分析
+        result = analyzer.run_product_discovery_analysis(batch_size=batch_size)
+        
+        if result.get('success', False):
+            logger.info(f"产品发现分析完成 - 总处理: {result['total_processed']}, 总提取: {result['total_extracted']}")
+        else:
+            logger.error(f"产品发现分析失败: {', '.join(result.get('errors', []))}")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"执行产品发现分析失败: {e}"
+        logger.error(error_msg)
+        return {
+            'success': False,
+            'error': error_msg,
+            'total_processed': 0,
+            'total_extracted': 0
+        }
+
+
+def run_report_generation_task(db_manager: DatabaseManager, period: str = 'daily', include_analysis: bool = True) -> Dict[str, Any]:
+    """
+    执行报告生成任务
+    
+    Args:
+        db_manager: 数据库管理器
+        period: 报告周期 ('daily', 'weekly', 'monthly')
+        include_analysis: 是否包含深度分析
+        
+    Returns:
+        报告生成结果
+    """
+    # 根据记忆，每个任务方法都必须包含db_manager.init_database()调用
+    db_manager.init_database()
+    
+    logger.info(f"开始执行{period}报告生成任务")
+    
+    try:
+        from .report_generator import ProductDiscoveryReportGenerator
+        
+        # 创建报告生成器实例
+        generator = ProductDiscoveryReportGenerator(db_manager)
+        
+        # 生成报告
+        result = generator.generate_product_discovery_report(period, include_analysis)
+        
+        if result.get('success', False):
+            logger.info(f"{period}报告生成成功: {result.get('report_path', '未知路径')}")
+            logger.info(f"产品数量: {result.get('products_count', 0)}, 分析数量: {result.get('analysis_count', 0)}")
+        else:
+            logger.error(f"{period}报告生成失败: {result.get('error', '未知错误')}")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"执行{period}报告生成失败: {e}"
+        logger.error(error_msg)
+        return {
+            'success': False,
+            'error': error_msg,
+            'report_path': None
+        }
+
+
+def run_tech_news_analysis_task(db_manager: DatabaseManager, hours_back: int = 24) -> Dict[str, Any]:
+    """
+    执行科技新闻分析任务
+    
+    Args:
+        db_manager: 数据库管理器
+        hours_back: 分析过去多少小时的新闻，默认24小时
+        
+    Returns:
+        分析结果
+    """
+    # 初始化数据库
+    db_manager.init_database()
+    
+    logger.info(f"开始执行科技新闻分析任务 - 分析过去{hours_back}小时的新闻")
+    
+    try:
+        from .analyzer import TechNewsAnalyzer
+        
+        # 创建科技新闻分析器实例
+        analyzer = TechNewsAnalyzer(db_manager)
+        
+        # 运行分析
+        result = analyzer.run_tech_news_analysis(hours_back)
+        
+        if result.get('success', False):
+            logger.info(f"科技新闻分析完成 - 找到 {result.get('total_articles_found', 0)} 篇文章，成功分析 {result.get('successful_analysis_count', 0)} 篇")
+        else:
+            logger.error(f"科技新闻分析失败: {result.get('message', '未知错误')}")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"执行科技新闻分析失败: {e}"
+        logger.error(error_msg)
+        return {
+            'success': False,
+            'message': error_msg,
+            'analysis_results': []
+        }
+
+
+def run_community_analysis_task(db_manager: DatabaseManager, days_back: int = 7) -> Dict[str, Any]:
+    """
+    执行社区讨论分析任务
+    
+    Args:
+        db_manager: 数据库管理器
+        days_back: 分析过去多少天的社区内容，默认7天
+        
+    Returns:
+        分析结果
+    """
+    # 初始化数据库
+    db_manager.init_database()
+    
+    logger.info(f"开始执行社区讨论分析任务 - 分析过去{days_back}天的内容")
+    
+    try:
+        # TODO: 在后续实现社区分析器后更新此代码
+        # from .analyzer import CommunityAnalyzer
+        # analyzer = CommunityAnalyzer(db_manager)
+        # result = analyzer.run_community_analysis(days_back)
+        
+        # 目前返回模拟结果
+        result = {
+            'success': True,
+            'message': '社区分析功能正在开发中',
+            'analysis_period': f'过去{days_back}天',
+            'analysis_results': []
+        }
+        
+        logger.info(f"社区讨论分析完成 - {result.get('message', '')}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"执行社区讨论分析失败: {e}"
+        logger.error(error_msg)
+        return {
+            'success': False,
+            'message': error_msg,
+            'analysis_results': []
+        }
+
+def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back: int = 24) -> Dict[str, Any]:
+    """
+    执行科技新闻分析与报告生成集成任务
+
+    Args:
+        db_manager: 数据库管理器
+        hours_back: 分析时段
+
+    Returns:
+        任务执行结果
+    """
+    logger.info(f"开始执行科技新闻分析与报告生成集成任务 - {hours_back}小时")
+
+    # 1. 执行分析任务
+    analysis_result = run_tech_news_analysis_task(db_manager, hours_back)
+
+    if not analysis_result.get('success'):
+        logger.error("分析步骤失败，报告生成中止。")
+        return analysis_result
+
+    # 2. 执行报告生成任务
+    try:
+        from .report_generator import generate_tech_news_report
+        report_result = generate_tech_news_report(analysis_result)
+        
+        if report_result.get('success'):
+            logger.info(f"科技新闻报告生成成功: {report_result.get('report_path')}")
+        else:
+            logger.error(f"报告生成失败: {report_result.get('error')}")
+
+        return report_result
+
+    except Exception as e:
+        error_msg = f"报告生成任务中发生未知错误: {e}"
+        logger.error(error_msg)
+        return {'success': False, 'error': error_msg}
+
+
+def run_community_deep_analysis_task(batch_size: int = 10):
+    """
+    运行社区深度内容分析任务
+    
+    Args:
+        batch_size: 单次处理的文章数量
+        
+    Returns:
+        任务执行结果
+    """
+    logger.info(f"开始执行社区深度内容分析任务，批次大小: {batch_size}")
+    
+    try:
+        # 初始化组件
+        db_manager = DatabaseManager(config)
+        from .analyzer import CommunityDeepAnalyzer
+        analyzer = CommunityDeepAnalyzer(db_manager)
+        
+        # 执行批量深度分析
+        success_count = analyzer.process_deep_analysis_batch(limit=batch_size)
+        
+        result = {
+            'success': True,
+            'processed_articles': success_count,
+            'message': f'成功分析 {success_count} 篇文章'
+        }
+        
+        logger.info(f"社区深度内容分析任务完成: {result['message']}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"社区深度内容分析任务失败: {e}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            'success': False,
+            'error': error_msg,
+            'processed_articles': 0
+        }
+
+
+def run_community_synthesis_report_task(days: int = 7, use_custom_filter: bool = False):
+    """
+    运行社区综合洞察报告生成任务
+    
+    Args:
+        days: 分析过去多少天的数据（默认筛选条件）
+        use_custom_filter: 是否使用自定义筛选条件（48小时indiehackers + 最新1篇ezindie）
+        
+    Returns:
+        任务执行结果
+    """
+    if use_custom_filter:
+        logger.info(f"开始执行社区综合洞察报告生成任务，使用自定义筛选：48小时内indiehackers + 最新1篇ezindie")
+    else:
+        logger.info(f"开始执行社区综合洞察报告生成任务，分析过去 {days} 天的数据")
+    
+    try:
+        # 初始化组件
+        db_manager = DatabaseManager(config)
+        from .analyzer import CommunityDeepAnalyzer
+        analyzer = CommunityDeepAnalyzer(db_manager)
+        
+        # 根据筛选条件生成报告
+        if use_custom_filter:
+            # 自定义筛选：48小时内的indiehackers数据 + 最新1篇ezindie
+            report_id = analyzer.generate_synthesis_report(
+                days=days,  # 保留默认值作为备用
+                indiehackers_hours=48,
+                ezindie_limit=1
+            )
+        else:
+            # 默认筛选：过去N天的数据
+            report_id = analyzer.generate_synthesis_report(days=days)
+        
+        if report_id:
+            filter_desc = "自定义筛选" if use_custom_filter else f"过去{days}天"
+            result = {
+                'success': True,
+                'report_id': report_id,
+                'message': f'成功生成综合洞察报告({filter_desc})，ID: {report_id}'
+            }
+        else:
+            result = {
+                'success': False,
+                'message': '没有足够的已分析文章来生成报告'
+            }
+        
+        logger.info(f"社区综合洞察报告生成任务完成: {result['message']}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"社区综合洞察报告生成任务失败: {e}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+
+def run_community_analysis_and_report_task(analysis_batch_size: int = 10, report_days: int = 7, 
+                                          use_custom_filter: bool = False):
+    """
+    运行完整的社区深度分析与报告生成任务
+    
+    Args:
+        analysis_batch_size: 深度分析的批次大小
+        report_days: 报告覆盖的天数（默认筛选条件）
+        use_custom_filter: 是否使用自定义筛选条件（48小时indiehackers + 最新1篇ezindie）
+        
+    Returns:
+        任务执行结果
+    """
+    filter_desc = "自定义筛选条件" if use_custom_filter else f"过去{report_days}天"
+    logger.info(f"开始执行完整的社区深度分析与报告生成任务，报告使用{filter_desc}")
+    
+    try:
+        # 步骤1：执行深度分析
+        analysis_result = run_community_deep_analysis_task(batch_size=analysis_batch_size)
+        
+        # 步骤2：生成综合报告
+        report_result = run_community_synthesis_report_task(
+            days=report_days, 
+            use_custom_filter=use_custom_filter
+        )
+        
+        # 合并结果
+        result = {
+            'success': analysis_result['success'] and report_result['success'],
+            'analysis_result': analysis_result,
+            'report_result': report_result,
+            'message': f"分析处理了 {analysis_result.get('processed_articles', 0)} 篇文章，报告生成: {report_result['message']}"
+        }
+        
+        logger.info(f"完整的社区深度分析与报告生成任务完成: {result['message']}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"完整的社区深度分析与报告生成任务失败: {e}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            'success': False,
+            'error': error_msg
+        }

@@ -13,6 +13,11 @@ def setup_logging():
     
     # 创建logger
     logger = logging.getLogger()
+    
+    # 检查是否已经配置过处理器，避免重复添加
+    if logger.handlers:
+        return logger
+    
     logger.setLevel(getattr(logging, log_config['log_level'].upper(), logging.INFO))
     
     # 创建formatter
