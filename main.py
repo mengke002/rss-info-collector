@@ -132,8 +132,12 @@ def main():
         result = run_tech_news_report_generation_task(db_manager, args.hours_back)
     elif args.task == 'full':
         result = run_full_maintenance(db_manager)
-    elif args.task == 'report_product':
-        run_product_discovery_report_task()
+    elif task == 'product_report_daily':
+        logger.info("触发产品发现报告生成任务(每日)")
+        result = run_product_report_task(days=1)
+    elif task == 'product_report_weekly':
+        logger.info("触发产品发现报告生成任务(每周)")
+        result = run_product_report_task(days=7)
     elif args.task == 'report_tech_news':
         run_tech_news_report_task()
     elif args.task == 'community_analysis':

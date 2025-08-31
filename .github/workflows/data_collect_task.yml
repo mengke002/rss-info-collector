@@ -8,8 +8,8 @@ on:
     - cron: '0 0 * * *'
     # 每天UTC时间1点、6点和13点生成科技新闻报告（对应北京时间9点、14点和21点）
     - cron: '0 1,6,13 * * *'
-    # 每天UTC时间1点、6点和13点生成产品发现报告（对应北京时间9点、14点和21点）
-    - cron: '0 1,6,13 * * *'
+    # 每天UTC时间1点生成产品发现报告（对应北京时间9点）
+    - cron: '0 1 * * *'
     # 每天UTC时间1点和13点生成社区报告（对应北京时间9点和21点）
     - cron: '0 1,13 * * *'
   workflow_dispatch:
@@ -25,7 +25,8 @@ on:
         - cleanup
         - stats
         - tech_news_report
-        - product_report
+        - product_report_daily
+        - product_report_weekly
         - community_report
 
 jobs:
@@ -125,7 +126,7 @@ jobs:
 
   product_discovery_report:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 1,6,13 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'product_report')
+    if: github.event.schedule == '0 1 * * *' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.task == 'product_report_daily' || github.event.inputs.task == 'product_report_weekly'))
     env:
       # --- 数据库密钥 ---
       DB_HOST: ${{ secrets.DB_HOST }}
@@ -160,8 +161,13 @@ jobs:
     - name: Run product discovery analysis
       run: python main.py --task analyze --batch-size 100
       
-    - name: Generate product discovery report
+    - name: Generate product discovery report (Daily)
+      if: github.event_name == 'schedule' || github.event.inputs.task == 'product_report_daily'
       run: python main.py --task report --report-period daily
+      
+    - name: Generate product discovery report (Weekly)
+      if: github.event_name == 'schedule' || github.event.inputs.task == 'product_report_weekly'
+      run: python main.py --task report --report-period weekly
       
     - name: Upload product discovery reports
       uses: actions/upload-artifact@v4
