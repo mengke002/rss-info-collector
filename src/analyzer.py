@@ -336,22 +336,53 @@ class DataAnalyzer:
                 logger.debug(f"直接使用结构化数据处理条目 {item.get('id', 'Unknown')}: {product_info.get('product_name', 'Unknown')}")
                 return product_info
             
-            # 其他情况使用LLM提取产品信息
-            product_info = self.extract_product_info(content_text, source_feed)
-            
-            if product_info:
+            # 对于betalist，优先使用现有结构化数据，LLM只做补充
+            if source_feed == 'betalist':
+                # 尝试使用LLM提取增强信息（categories, tagline等）
+                product_info = self.extract_product_info(content_text, source_feed)
+                
+                # 如果LLM提取失败，创建基础产品信息
+                if not product_info:
+                    logger.warning(f"LLM提取失败，为Betalist条目 {item.get('id')} 创建基础产品信息")
+                    product_info = {
+                        'product_name': None,
+                        'tagline': None,
+                        'description': None,
+                        'product_url': None,
+                        'categories': None,
+                        'metrics': {
+                            'problem_solved': None,
+                            'target_audience': None,
+                            'tech_stack': None,
+                            'business_model': None
+                        },
+                        'source_feed': source_feed
+                    }
+                
+                # 使用数据库可靠信息覆盖/补充LLM结果
+                # 确保关键信息不会因LLM失败而丢失
+                if item.get('title'):
+                    product_info['product_name'] = item.get('title')  # 产品名称以数据库为准
+                if item.get('visit_url'):
+                    product_info['product_url'] = item.get('visit_url')  # URL以数据库为准
+                if item.get('summary') and not product_info.get('description'):
+                    product_info['description'] = item.get('summary')  # 描述补充
+                
                 # 添加时间信息
                 product_info['source_published_at'] = item.get('published_at')
+                product_info['source_feed'] = source_feed
+                
+                logger.debug(f"Betalist条目 {item.get('id')} 处理完成 - LLM增强+数据库保底，URL: {product_info.get('product_url')}")
+                
+            else:
+                # 其他情况使用LLM提取产品信息
+                product_info = self.extract_product_info(content_text, source_feed)
+                
+                if product_info:
+                    # 添加时间信息
+                    product_info['source_published_at'] = item.get('published_at')
 
-                # --- FIX for Betalist URL ---
-                # For betalist, the real product URL is in the 'visit_url' field.
-                # The LLM might not be able to extract it from the summary.
-                # We will use it directly if available, overriding any LLM extraction.
-                if source_feed == 'betalist' and item.get('visit_url'):
-                    product_info['product_url'] = item.get('visit_url')
-                    logger.debug(f"为Betalist条目 {item.get('id')} 直接使用 visit_url: {item.get('visit_url')}")
-                # --- End of FIX ---
-
+            if product_info:
                 logger.debug(f"成功处理条目 {item.get('id', 'Unknown')}: {product_info.get('product_name', 'Unknown')}")
             
             return product_info
