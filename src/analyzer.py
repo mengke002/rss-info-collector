@@ -342,6 +342,16 @@ class DataAnalyzer:
             if product_info:
                 # 添加时间信息
                 product_info['source_published_at'] = item.get('published_at')
+
+                # --- FIX for Betalist URL ---
+                # For betalist, the real product URL is in the 'visit_url' field.
+                # The LLM might not be able to extract it from the summary.
+                # We will use it directly if available, overriding any LLM extraction.
+                if source_feed == 'betalist' and item.get('visit_url'):
+                    product_info['product_url'] = item.get('visit_url')
+                    logger.debug(f"为Betalist条目 {item.get('id')} 直接使用 visit_url: {item.get('visit_url')}")
+                # --- End of FIX ---
+
                 logger.debug(f"成功处理条目 {item.get('id', 'Unknown')}: {product_info.get('product_name', 'Unknown')}")
             
             return product_info
