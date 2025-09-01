@@ -1003,7 +1003,7 @@ class DatabaseManager:
                         if table_name == 'rss_indiehackers' and indiehackers_hours is not None:
                             # indiehackers 使用小时限制 (created_at, updated_at, or published_at)
                             query = f"""
-                                SELECT id, title, deep_analysis_data, published_at, created_at, updated_at, '{table_name}' as source_table
+                                SELECT id, title, link, deep_analysis_data, published_at, created_at, updated_at, '{table_name}' as source_table
                                 FROM {table_name} 
                                 WHERE deep_analysis_status = 1 
                                 AND deep_analysis_data IS NOT NULL
@@ -1019,7 +1019,7 @@ class DatabaseManager:
                         elif table_name == 'rss_ezindie' and ezindie_limit is not None:
                             # ezindie 使用数量限制
                             query = f"""
-                                SELECT id, title, deep_analysis_data, published_at, '{table_name}' as source_table
+                                SELECT id, title, link, deep_analysis_data, published_at, '{table_name}' as source_table
                                 FROM {table_name} 
                                 WHERE deep_analysis_status = 1 
                                 AND deep_analysis_data IS NOT NULL
@@ -1031,7 +1031,7 @@ class DatabaseManager:
                         else:
                             # 默认使用天数限制
                             query = f"""
-                                SELECT id, title, deep_analysis_data, published_at, '{table_name}' as source_table
+                                SELECT id, title, link, deep_analysis_data, published_at, '{table_name}' as source_table
                                 FROM {table_name} 
                                 WHERE deep_analysis_status = 1 
                                 AND deep_analysis_data IS NOT NULL
