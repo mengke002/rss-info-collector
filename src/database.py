@@ -1001,16 +1001,20 @@ class DatabaseManager:
                         
                         # 根据表名设置不同的查询条件
                         if table_name == 'rss_indiehackers' and indiehackers_hours is not None:
-                            # indiehackers 使用小时限制
+                            # indiehackers 使用小时限制 (created_at, updated_at, or published_at)
                             query = f"""
-                                SELECT id, title, deep_analysis_data, published_at, '{table_name}' as source_table
+                                SELECT id, title, deep_analysis_data, published_at, created_at, updated_at, '{table_name}' as source_table
                                 FROM {table_name} 
                                 WHERE deep_analysis_status = 1 
                                 AND deep_analysis_data IS NOT NULL
-                                AND published_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                                AND (
+                                    created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR) OR
+                                    updated_at >= DATE_SUB(NOW(), INTERVAL %s HOUR) OR
+                                    published_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                                )
                                 ORDER BY published_at DESC
                             """
-                            cursor.execute(query, (indiehackers_hours,))
+                            cursor.execute(query, (indiehackers_hours, indiehackers_hours, indiehackers_hours))
                             
                         elif table_name == 'rss_ezindie' and ezindie_limit is not None:
                             # ezindie 使用数量限制
