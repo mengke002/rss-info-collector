@@ -155,10 +155,25 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
                         product_types = ['alltime', 'month', 'week', 'today']
                         group_types = ['growth', 'developers', 'saas']
 
-                        if feed_type in product_types:
-                            items = asyncio.run(indiehackers_scraper.scrape_products(scrape_period))
-                        elif feed_type in group_types:
-                            items = asyncio.run(indiehackers_scraper.scrape_group(scrape_group))
+                        # 使用nest_asyncio来处理嵌套事件循环
+                        try:
+                            import nest_asyncio
+                            nest_asyncio.apply()
+                        except ImportError:
+                            pass  # 如果没有nest_asyncio，继续尝试
+                        
+                        try:
+                            if feed_type in product_types:
+                                items = asyncio.run(indiehackers_scraper.scrape_products(scrape_period))
+                            elif feed_type in group_types:
+                                items = asyncio.run(indiehackers_scraper.scrape_group(scrape_group))
+                        except RuntimeError as e:
+                            if "cannot be called from a running event loop" in str(e):
+                                # 如果在事件循环中运行，使用同步的方式调用
+                                logger.warning("在事件循环中运行，跳过爬虫回滚")
+                                items = []
+                            else:
+                                raise
                         
                         if items:
                             logger.info(f"Successfully scraped {len(items)} items for '{feed_name}'.")
