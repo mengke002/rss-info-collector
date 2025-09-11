@@ -128,8 +128,8 @@ class Config:
             'indiehackers_growth': {'rss_url': 'https://ihrss.io/group/growth', 'interval': 1800},
             'indiehackers_developers': {'rss_url': 'https://ihrss.io/group/developers', 'interval': 1800},
             'indiehackers_saas': {'rss_url': 'https://ihrss.io/group/saas-marketing', 'interval': 1800},
-            'ycombinator': {'rss_url': '{{RSSHUB_HOST}}/hackernews', 'interval': 1800},
-            'techcrunch': {'rss_url': '{{RSSHUB_HOST}}/techcrunch/news', 'interval': 1800},
+            'ycombinator': {'rss_url': '/hackernews', 'interval': 1800, 'use_rsshub': True},
+            'techcrunch': {'rss_url': '/techcrunch/news', 'interval': 1800, 'use_rsshub': True},
             'techcrunch_ai': {'rss_url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'interval': 1800},
             'ezindie': {'rss_url': 'https://www.ezindie.com/feed/rss.xml', 'interval': 1800},
             'decohack': {'rss_url': 'https://decohack.com/feed/', 'interval': 1800},
@@ -161,7 +161,8 @@ class Config:
             if rss_url:
                 final_feeds[name] = {
                     'rss_url': rss_url,
-                    'interval': interval
+                    'interval': interval,
+                    'use_rsshub': defaults.get('use_rsshub', False) # 从默认值继承, 不允许用户覆盖
                 }
                 # 分配特定策略
                 if 'techcrunch' in name and name != 'techcrunch_ai':

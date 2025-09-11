@@ -1,0 +1,111 @@
+name: RSS Crawler Task
+
+on:
+  schedule:
+    # 每30分钟运行一次采集任务
+    - cron: '*/30 * * * *'
+    # 每天UTC时间0点运行维护任务
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '要手动执行的任务'
+        required: true
+        default: 'crawl'
+        type: choice
+        options:
+        - crawl
+        - cleanup
+        - stats
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/30 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'crawl')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- RSSHub Hosts ---
+      RSSHUB_HOSTS: ${{ secrets.RSSHUB_HOSTS }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Install Playwright browsers
+      run: playwright install --with-deps chromium
+        
+    - name: Run crawler
+      run: python main.py --task crawl
+
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'cleanup')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4:
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run cleanup
+      run: python main.py --task cleanup
+
+  stats:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stats')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Get stats
+      run: python main.py --task stats

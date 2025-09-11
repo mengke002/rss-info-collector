@@ -1,0 +1,238 @@
+name: RSS Reports Task
+
+on:
+  schedule:
+    # 每天UTC时间1点、6点和13点生成科技新闻报告（对应北京时间9点、14点和21点）
+    - cron: '0 1,6,13 * * *'
+    # 每天UTC时间1点生成产品发现报告（对应北京时间9点）
+    - cron: '0 1 * * *'
+    # 每周一UTC时间2点生成产品发现周报（对应北京时间10点）
+    - cron: '0 2 * * 1'
+    # 每天UTC时间1点和13点生成社区报告（对应北京时间9点和21点）
+    - cron: '0 1,13 * * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '要手动执行的任务'
+        required: true
+        default: 'analyze'
+        type: choice
+        options:
+        - analyze
+        - tech_news_report
+        - product_report_daily
+        - product_report_weekly
+        - community_report
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'analyze'
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- LLM密钥 ---
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      # --- LLM模型配置 (可选, 可覆盖config.ini) ---
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run analyzer
+      run: python main.py --task analyze --batch-size 1000
+
+  tech_news_report:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 1,6,13 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'tech_news_report')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- LLM密钥 ---
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      # --- LLM模型配置 (可选, 可覆盖config.ini) ---
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Generate tech news report
+      run: python main.py --task tech_news_report --hours-back 24
+      
+    - name: Upload report artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: tech-news-reports
+        path: reports/tech_news_report_*.md
+        retention-days: 30
+
+  product_discovery_report:
+    runs-on: ubuntu-latest
+    if: (github.event.schedule == '0 1 * * *' && github.event.schedule != '0 2 * * 1') || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'product_report_daily')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- LLM密钥 ---
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      # --- LLM模型配置 (可选, 可覆盖config.ini) ---
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Generate product discovery report (Daily)
+      run: python main.py --task report --report-period daily
+      
+    - name: Upload product discovery reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: product-discovery-reports-daily
+        path: reports/product_discovery_daily_*.md
+        retention-days: 30
+
+  product_discovery_report_weekly:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 2 * * 1' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'product_report_weekly')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- LLM密钥 ---
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      # --- LLM模型配置 (可选, 可覆盖config.ini) ---
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Generate product discovery report (Weekly)
+      run: python main.py --task report --report-period weekly
+
+    - name: Upload product discovery reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: product-discovery-reports-weekly
+        path: reports/product_discovery_weekly_*.md
+        retention-days: 30
+
+  community_report:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 1,13 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'community_report')
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- LLM密钥 ---
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      # --- LLM模型配置 (可选, 可覆盖config.ini) ---
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run community analysis and generate report
+      run: python main.py --task community_full --custom-filter
+      
+    - name: Upload community report artifacts
+      run: echo "Community report generated and saved to database."
