@@ -1,6 +1,6 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth
+from playwright_stealth.stealth import stealth_async
 from bs4 import BeautifulSoup
 import html2text
 from urllib.parse import urljoin
@@ -18,7 +18,7 @@ async def get_html_with_playwright(url: str) -> str | None:
             page = await browser.new_page()
             
             # 应用stealth插件
-            await stealth(page)
+            await stealth_async(page)
             
             # 访问页面，等待网络空闲以确保JavaScript加载完成
             await page.goto(url, wait_until='networkidle', timeout=90000)
