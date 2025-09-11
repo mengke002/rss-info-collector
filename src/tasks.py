@@ -10,6 +10,7 @@ from .rss_parser import rss_parser
 from .content_enhancer import content_enhancer
 from .logger import logger
 from .database import DatabaseManager
+from . import indiehackers_scraper
 
 
 def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> List[Dict[str, Any]]:
@@ -132,26 +133,62 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
         try:
             logger.info(f"处理RSS源: {feed_name}")
 
-            # 确定表名和feed类型
+            items = []  # Initialize items list
+
+            # 确定表名和feed类型, 并获取items
             if 'indiehackers' in feed_name:
                 table_name = "rss_indiehackers"
                 feed_type = feed_name.replace('indiehackers_', '')
+                
+                logger.info(f"Attempting to fetch Indie Hackers feed '{feed_name}' via RSS.")
+                items = rss_parser.parse_feed(feed_config)
+
+                # rss_parser returns [] on error. If items is empty, trigger the fallback scraper.
+                if not items:
+                    logger.warning(f"RSS feed for '{feed_name}' returned no items or failed to parse. Falling back to web scraper.")
+                    try:
+                        # The scraper's period for 'alltime' is 'all-time'
+                        scrape_period = 'all-time' if feed_type == 'alltime' else feed_type
+                        # The scraper's group name for 'saas' is 'saas-marketing'
+                        scrape_group = 'saas-marketing' if feed_type == 'saas' else feed_type
+
+                        product_types = ['alltime', 'month', 'week', 'today']
+                        group_types = ['growth', 'developers', 'saas']
+
+                        if feed_type in product_types:
+                            items = asyncio.run(indiehackers_scraper.scrape_products(scrape_period))
+                        elif feed_type in group_types:
+                            items = asyncio.run(indiehackers_scraper.scrape_group(scrape_group))
+                        
+                        if items:
+                            logger.info(f"Successfully scraped {len(items)} items for '{feed_name}'.")
+                            # Normalize scraped data to match DB schema
+                            for item in items:
+                                item['guid'] = item.get('link') # Use link as GUID for scraped items
+                        else:
+                            logger.error(f"Scraper for '{feed_name}' returned no items.")
+
+                    except Exception as scraper_e:
+                        logger.error(f"Scraper for '{feed_name}' also failed: {scraper_e}", exc_info=True)
+                        items = [] # Ensure items is an empty list if scraper fails too
+            
             elif 'techcrunch' in feed_name:
                 table_name = "rss_techcrunch"
                 feed_type = 'techcrunch'
+                items = rss_parser.parse_feed(feed_config)
             elif 'ezindie' in feed_name:
                 table_name = "rss_ezindie"
                 feed_type = 'ezindie'
+                items = rss_parser.parse_feed(feed_config)
             elif 'decohack' in feed_name:
                 table_name = "rss_decohack_products"
                 feed_type = 'decohack'
+                items = rss_parser.parse_feed(feed_config)
             else:
                 # 默认情况下，表名为 rss_{feed_name}
                 table_name = f"rss_{feed_name}"
                 feed_type = feed_name
-
-            # 解析RSS
-            items = rss_parser.parse_feed(feed_config)
+                items = rss_parser.parse_feed(feed_config)
             
             # 对于decohack，特殊处理
             if 'decohack' in feed_name:
@@ -233,7 +270,6 @@ def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Di
     results['success'] = len(results['errors']) == 0
     return results
 
-
 def run_cleanup_task(db_manager: DatabaseManager, days: int = None) -> Dict[str, Any]:
     """执行清理任务"""
     if days is None:
@@ -270,7 +306,6 @@ def run_cleanup_task(db_manager: DatabaseManager, days: int = None) -> Dict[str,
             results['error'] = str(e)
 
     return results
-
 
 def run_stats_task(db_manager: DatabaseManager) -> Dict[str, Any]:
     """执行统计任务"""
@@ -311,7 +346,6 @@ def run_stats_task(db_manager: DatabaseManager) -> Dict[str, Any]:
 
     return results
 
-
 def _get_indiehackers_stats_by_type(db_manager: DatabaseManager) -> Dict[str, Any]:
     """获取indiehackers按feed_type的统计"""
     try:
@@ -327,7 +361,6 @@ def _get_indiehackers_stats_by_type(db_manager: DatabaseManager) -> Dict[str, An
     except Exception as e:
         logger.error(f"获取indiehackers分类统计失败: {e}")
         return {}
-
 
 def run_product_discovery_analysis(db_manager: DatabaseManager, batch_size: int = 50) -> Dict[str, Any]:
     """
@@ -370,7 +403,6 @@ def run_product_discovery_analysis(db_manager: DatabaseManager, batch_size: int 
             'total_processed': 0,
             'total_extracted': 0
         }
-
 
 def run_report_generation_task(db_manager: DatabaseManager, period: str = 'daily', include_analysis: bool = True) -> Dict[str, Any]:
     """
@@ -433,7 +465,6 @@ def run_report_generation_task(db_manager: DatabaseManager, period: str = 'daily
             'report_path': None
         }
 
-
 def run_tech_news_analysis_task(db_manager: DatabaseManager, hours_back: int = 24) -> Dict[str, Any]:
     """
     执行科技新闻分析任务
@@ -474,7 +505,6 @@ def run_tech_news_analysis_task(db_manager: DatabaseManager, hours_back: int = 2
             'message': error_msg,
             'analysis_results': []
         }
-
 
 def run_community_analysis_task(db_manager: DatabaseManager, days_back: int = 7) -> Dict[str, Any]:
     """
@@ -574,7 +604,6 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
         logger.error(error_msg)
         return {'success': False, 'error': error_msg}
 
-
 def run_community_deep_analysis_task(batch_size: int = 10):
     """
     运行社区深度内容分析任务
@@ -602,7 +631,7 @@ def run_community_deep_analysis_task(batch_size: int = 10):
             'message': f'成功分析 {success_count} 篇文章'
         }
         
-        logger.info(f"社区深度内容分析任务完成: {result['message']}")
+        logger.info(f"社区深度内容分析任务完成: {result['message']}" )
         return result
         
     except Exception as e:
@@ -613,7 +642,6 @@ def run_community_deep_analysis_task(batch_size: int = 10):
             'error': error_msg,
             'processed_articles': 0
         }
-
 
 def run_community_synthesis_report_task(days: int = 7, use_custom_filter: bool = False):
     """
@@ -662,7 +690,7 @@ def run_community_synthesis_report_task(days: int = 7, use_custom_filter: bool =
                 'message': '没有足够的已分析文章来生成报告'
             }
         
-        logger.info(f"社区综合洞察报告生成任务完成: {result['message']}")
+        logger.info(f"社区综合洞察报告生成任务完成: {result['message']}" )
         return result
         
     except Exception as e:
@@ -672,7 +700,6 @@ def run_community_synthesis_report_task(days: int = 7, use_custom_filter: bool =
             'success': False,
             'error': error_msg
         }
-
 
 def run_community_analysis_and_report_task(analysis_batch_size: int = 10, report_days: int = 7, 
                                           use_custom_filter: bool = False):
@@ -708,7 +735,7 @@ def run_community_analysis_and_report_task(analysis_batch_size: int = 10, report
             'message': f"分析处理了 {analysis_result.get('processed_articles', 0)} 篇文章，报告生成: {report_result['message']}"
         }
         
-        logger.info(f"完整的社区深度分析与报告生成任务完成: {result['message']}")
+        logger.info(f"完整的社区深度分析与报告生成任务完成: {result['message']}" )
         return result
         
     except Exception as e:
