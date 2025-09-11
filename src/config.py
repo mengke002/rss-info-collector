@@ -4,7 +4,7 @@
 """
 import os
 import configparser
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 class Config:
@@ -105,6 +105,12 @@ class Config:
             'log_level': self._get_config_value('logging', 'log_level', 'LOGGING_LOG_LEVEL', 'INFO'),
             'log_file': self._get_config_value('logging', 'log_file', 'LOGGING_LOG_FILE', 'rss_crawler.log')
         }
+
+    def get_rsshub_hosts(self) -> List[str]:
+        """获取RSSHub实例列表"""
+        hosts_str = self._get_config_value('rsshub', 'hosts', 'RSSHUB_HOSTS', 
+                                          'https://rsshub.rssforever.com,https://rss.injahow.cn')
+        return [host.strip() for host in hosts_str.split(',') if host.strip()]
     
     def get_feed_configs(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -122,8 +128,8 @@ class Config:
             'indiehackers_growth': {'rss_url': 'https://ihrss.io/group/growth', 'interval': 1800},
             'indiehackers_developers': {'rss_url': 'https://ihrss.io/group/developers', 'interval': 1800},
             'indiehackers_saas': {'rss_url': 'https://ihrss.io/group/saas-marketing', 'interval': 1800},
-            'ycombinator': {'rss_url': 'https://rsshub.rssforever.com/hackernews', 'interval': 1800},
-            'techcrunch': {'rss_url': 'https://rsshub.rssforever.com/techcrunch/news', 'interval': 1800},
+            'ycombinator': {'rss_url': '{{RSSHUB_HOST}}/hackernews', 'interval': 1800},
+            'techcrunch': {'rss_url': '{{RSSHUB_HOST}}/techcrunch/news', 'interval': 1800},
             'techcrunch_ai': {'rss_url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'interval': 1800},
             'ezindie': {'rss_url': 'https://www.ezindie.com/feed/rss.xml', 'interval': 1800},
             'decohack': {'rss_url': 'https://decohack.com/feed/', 'interval': 1800},

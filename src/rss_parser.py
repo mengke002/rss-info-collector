@@ -9,10 +9,12 @@ import html
 import re
 import io
 import asyncio
+import random
 from crawl4ai import AsyncWebCrawler
 from bs4 import BeautifulSoup
 
 from .logger import logger
+from .config import config
 
 class RSSParser:
     """RSS解析器"""
@@ -44,45 +46,53 @@ class RSSParser:
 
     def _parse_with_requests(self, url: str) -> List[Dict[str, Any]]:
         """使用requests解析RSS源，并支持备用URL机制"""
-        try:
-            response = self.session.get(url, timeout=self.timeout)
-            response.raise_for_status()
-            content = response.content.decode('utf-8', errors='ignore')
-            return self._parse_xml_content(content, url)
-        except Exception as e:
-            logger.warning(f"Failed to parse RSS feed {url} with requests: {e}")
-            
-            # 检查是否为RSSHub源，并尝试备用URL
-            if "https://rsshub.rssforever.com/" in url:
-                backup_url = url.replace("https://rsshub.rssforever.com/", "https://rsshub.app/")
-                logger.info(f"Attempting to fetch from backup URL: {backup_url}")
+        if '{{RSSHUB_HOST}}' in url:
+            rsshub_hosts = config.get_rsshub_hosts()
+            shuffled_hosts = random.sample(rsshub_hosts, len(rsshub_hosts))
+            for host in shuffled_hosts:
+                concrete_url = url.replace('{{RSSHUB_HOST}}', host)
                 try:
-                    response = self.session.get(backup_url, timeout=self.timeout)
+                    response = self.session.get(concrete_url, timeout=self.timeout)
                     response.raise_for_status()
                     content = response.content.decode('utf-8', errors='ignore')
-                    return self._parse_xml_content(content, backup_url)
-                except Exception as backup_e:
-                    logger.error(f"Failed to parse RSS feed from backup URL {backup_url}: {backup_e}")
-            
+                    logger.info(f"Successfully fetched from {concrete_url}")
+                    return self._parse_xml_content(content, concrete_url)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch from {concrete_url}: {e}")
+                    continue
+            logger.error(f"All RSSHub hosts failed for base url {url}")
             return []
+        else:
+            try:
+                response = self.session.get(url, timeout=self.timeout)
+                response.raise_for_status()
+                content = response.content.decode('utf-8', errors='ignore')
+                return self._parse_xml_content(content, url)
+            except Exception as e:
+                logger.error(f"Failed to parse RSS feed {url} with requests: {e}")
+                return []
 
     async def _parse_with_crawl4ai(self, url: str) -> List[Dict[str, Any]]:
         """使用crawl4ai解析RSS源（异步），并支持备用URL机制"""
-        try:
-            return await self._fetch_and_parse_crawl4ai(url)
-        except Exception as e:
-            logger.warning(f"Failed to parse RSS feed {url} with crawl4ai: {e}")
-            
-            # 检查是否为RSSHub源，并尝试备用URL
-            if "https://rsshub.rssforever.com/" in url:
-                backup_url = url.replace("https://rsshub.rssforever.com/", "https://rsshub.app/")
-                logger.info(f"Attempting to fetch from backup URL with crawl4ai: {backup_url}")
+        if '{{RSSHUB_HOST}}' in url:
+            rsshub_hosts = config.get_rsshub_hosts()
+            shuffled_hosts = random.sample(rsshub_hosts, len(rsshub_hosts))
+            for host in shuffled_hosts:
+                concrete_url = url.replace('{{RSSHUB_HOST}}', host)
                 try:
-                    return await self._fetch_and_parse_crawl4ai(backup_url)
-                except Exception as backup_e:
-                    logger.error(f"Failed to parse RSS feed from backup URL {backup_url} with crawl4ai: {backup_e}")
-
+                    logger.info(f"Attempting to fetch from {concrete_url} with crawl4ai")
+                    return await self._fetch_and_parse_crawl4ai(concrete_url)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch from {concrete_url} with crawl4ai: {e}")
+                    continue
+            logger.error(f"All RSSHub hosts failed for base url {url} with crawl4ai")
             return []
+        else:
+            try:
+                return await self._fetch_and_parse_crawl4ai(url)
+            except Exception as e:
+                logger.error(f"Failed to parse RSS feed {url} with crawl4ai: {e}")
+                return []
 
     async def _fetch_and_parse_crawl4ai(self, url: str) -> List[Dict[str, Any]]:
         """crawl4ai的实际获取和解析逻辑"""
