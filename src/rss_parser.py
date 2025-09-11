@@ -49,7 +49,9 @@ class RSSParser:
         url_or_path = feed_config['rss_url']
 
         if feed_config.get('use_rsshub'):
-            path = urlparse(url_or_path).path if url_or_path.startswith('http') else url_or_path
+            # 移除占位符并确保路径以/开头
+            path = url_or_path.replace('{{RSSHUB_HOST}}', '').strip('/')
+            path = f"/{path}"
             
             rsshub_hosts = config.get_rsshub_hosts()
             if url_or_path.startswith('http'):
@@ -86,7 +88,9 @@ class RSSParser:
         url_or_path = feed_config['rss_url']
 
         if feed_config.get('use_rsshub'):
-            path = urlparse(url_or_path).path if url_or_path.startswith('http') else url_or_path
+            # 移除占位符并确保路径以/开头
+            path = url_or_path.replace('{{RSSHUB_HOST}}', '').strip('/')
+            path = f"/{path}"
 
             rsshub_hosts = config.get_rsshub_hosts()
             if url_or_path.startswith('http'):
@@ -138,8 +142,9 @@ class RSSParser:
                     xml_content = self._fix_broken_xml(xml_content)
                     return self._parse_xml_content(xml_content, url)
         
-        # 回退到requests
-        return self._parse_with_requests(url)
+        # 如果无法从HTML中直接提取，记录错误并返回空列表
+        logger.warning(f"Could not find valid RSS/XML content in the HTML from {url}")
+        return []
 
     def _parse_xml_content(self, content: str, url: str) -> List[Dict[str, Any]]:
         """从XML内容解析条目"""
