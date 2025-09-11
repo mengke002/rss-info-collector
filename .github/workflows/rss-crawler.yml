@@ -1,4 +1,4 @@
-name: RSS Crawler Task
+name: RSS Crawler & Analyzer Task
 
 on:
   schedule:
@@ -15,6 +15,7 @@ on:
         type: choice
         options:
         - crawl
+        - analyze
         - cleanup
         - stats
 
@@ -53,6 +54,44 @@ jobs:
         
     - name: Run crawler
       run: python main.py --task crawl
+
+  analyze:
+    runs-on: ubuntu-latest
+    needs: crawl
+    if: always() && needs.crawl.result == 'success'
+    env:
+      # --- 数据库密钥 ---
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # --- LLM密钥 ---
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      # --- LLM模型配置 (可选, 可覆盖config.ini) ---
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      # --- 并行化配置 (可选) ---
+      EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run analyzer
+      run: python main.py --task analyze --batch-size 1000
 
   cleanup:
     runs-on: ubuntu-latest
