@@ -1,6 +1,6 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth.stealth import stealth_async
+from playwright_stealth import stealth_async
 from bs4 import BeautifulSoup
 import html2text
 from urllib.parse import urljoin
