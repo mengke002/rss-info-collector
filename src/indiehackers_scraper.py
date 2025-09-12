@@ -352,24 +352,3 @@ async def scrape_group(group_name: str) -> list:
     print(f"Scraping Indie Hackers group: {group_name} from {url}")
     html = await get_html_with_playwright(url)
     return parse_groups(html)
-
-async def main():
-    """Main function for testing the scraper."""
-    print("--- Testing Product Scraping (week) ---")
-    weekly_products = await scrape_products('week')
-    if weekly_products:
-        print(f"Found {len(weekly_products)} products.")
-        print(f"First product: {weekly_products[0]}")
-    else:
-        print("No products found or error occurred.")
-
-    print("\n--- Testing Group Scraping (developers) ---")
-    dev_posts = await scrape_group('developers')
-    if dev_posts:
-        print(f"Found {len(dev_posts)} posts.")
-        print(f"First post: {dev_posts[0]}")
-    else:
-        print("No posts found or error occurred.")
-
-if __name__ == '__main__':
-    asyncio.run(main())
