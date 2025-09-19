@@ -723,6 +723,59 @@ class NotionClient:
             # 创建这个分块的表格
             self._create_single_notion_table(headers, chunk, blocks, tables_to_add)
 
+    def _parse_table_cell_content(self, cell_content: str) -> List[Dict]:
+        """解析表格单元格内容，支持链接和格式"""
+        if not cell_content:
+            return [{"type": "text", "text": {"content": ""}}]
+
+        # 检查是否包含Markdown链接
+        import re
+        link_pattern = r'\[([^\]]+)\]\((https?://[^)]+)\)'
+
+        rich_text = []
+        last_end = 0
+
+        for match in re.finditer(link_pattern, cell_content):
+            # 添加链接前的普通文本
+            if match.start() > last_end:
+                before_text = cell_content[last_end:match.start()]
+                if before_text:
+                    rich_text.append({
+                        "type": "text",
+                        "text": {"content": before_text}
+                    })
+
+            # 添加链接
+            link_text = match.group(1)
+            link_url = match.group(2)
+            rich_text.append({
+                "type": "text",
+                "text": {
+                    "content": link_text,
+                    "link": {"url": link_url}
+                }
+            })
+
+            last_end = match.end()
+
+        # 添加剩余的普通文本
+        if last_end < len(cell_content):
+            remaining_text = cell_content[last_end:]
+            if remaining_text:
+                rich_text.append({
+                    "type": "text",
+                    "text": {"content": remaining_text}
+                })
+
+        # 如果没有找到任何链接，返回普通文本
+        if not rich_text:
+            rich_text = [{
+                "type": "text",
+                "text": {"content": cell_content}
+            }]
+
+        return rich_text
+
     def _create_large_content_page(self, parent_page_id: str, page_title: str,
                                   content_blocks: List[Dict]) -> Dict[str, Any]:
         """创建大内容页面，分批添加内容块"""
@@ -814,10 +867,9 @@ class NotionClient:
             # 添加标题行
             header_cells = []
             for header in headers:
-                header_cells.append([{
-                    "type": "text",
-                    "text": {"content": header or ""}
-                }])
+                # 标题行也支持链接解析（虽然不太常见）
+                header_rich_text = self._parse_table_cell_content(header or "")
+                header_cells.append(header_rich_text)
 
             table_children.append({
                 "type": "table_row",
@@ -840,10 +892,9 @@ class NotionClient:
                     if len(cell_content) > 200:  # 限制单元格内容长度
                         cell_content = cell_content[:197] + "..."
 
-                    row_cells.append([{
-                        "type": "text",
-                        "text": {"content": cell_content}
-                    }])
+                    # 解析单元格内容，支持链接
+                    cell_rich_text = self._parse_table_cell_content(cell_content)
+                    row_cells.append(cell_rich_text)
 
                 table_children.append({
                     "type": "table_row",
