@@ -15,6 +15,7 @@ import uuid
 from .config import config
 from .database import DatabaseManager
 from .llm_client import call_llm
+from .notion_client import notion_client
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,10 @@ class TechNewsReportGenerator:
                         
                         conn.commit()
                         logger.info(f"报告已成功存入数据库 - UUID: {report_uuid}")
-                        
+
+                        # 推送到 Notion
+                        self._push_to_notion(full_report_md, report_uuid)
+
             except Exception as e:
                 logger.error(f"存储报告到数据库失败: {e}")
                 return {
@@ -192,6 +196,32 @@ class TechNewsReportGenerator:
                 'error': str(e),
                 'report_uuid': None
             }
+
+    def _push_to_notion(self, report_content: str, report_uuid: str):
+        """将报告推送到 Notion"""
+        try:
+            # 从报告内容中提取标题
+            lines = report_content.split('\n')
+            report_title = "科技新闻洞察报告"
+            for line in lines:
+                if line.startswith('# '):
+                    report_title = line[2:].strip()
+                    break
+
+            logger.info(f"开始推送报告到 Notion: {report_title}")
+
+            result = notion_client.create_report_page(report_title, report_content)
+
+            if result.get('success'):
+                if result.get('skipped'):
+                    logger.info(f"报告已存在于 Notion，跳过推送: {result.get('page_url')}")
+                else:
+                    logger.info(f"报告成功推送到 Notion: {result.get('page_url')}")
+            else:
+                logger.error(f"推送报告到 Notion 失败: {result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"推送报告到 Notion 时出错: {e}", exc_info=True)
 
     def _save_report_as_backup_file(self, report_uuid: str, content: str, report_type: str):
         """在数据库保存失败时，将报告保存为本地文件作为备份。"""
@@ -342,11 +372,41 @@ class ProductDiscoveryReportGenerator:
         try:
             self.db_manager.save_product_report(report_data)
             logger.info(f"产品发现报告 {report_uuid} 已成功存入数据库。")
+
+            # 推送到 Notion
+            self._push_to_notion(full_report_md, report_uuid)
+
         except Exception as e:
             logger.error(f"保存产品发现报告到数据库时失败: {e}", exc_info=True)
             self._save_report_as_backup_file(report_uuid, full_report_md, "product")
 
         return report_uuid
+
+    def _push_to_notion(self, report_content: str, report_uuid: str):
+        """将报告推送到 Notion"""
+        try:
+            # 从报告内容中提取标题
+            lines = report_content.split('\n')
+            report_title = "产品发现报告"
+            for line in lines:
+                if line.startswith('# '):
+                    report_title = line[2:].strip()
+                    break
+
+            logger.info(f"开始推送产品发现报告到 Notion: {report_title}")
+
+            result = notion_client.create_report_page(report_title, report_content)
+
+            if result.get('success'):
+                if result.get('skipped'):
+                    logger.info(f"报告已存在于 Notion，跳过推送: {result.get('page_url')}")
+                else:
+                    logger.info(f"产品发现报告成功推送到 Notion: {result.get('page_url')}")
+            else:
+                logger.error(f"推送产品发现报告到 Notion 失败: {result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"推送产品发现报告到 Notion 时出错: {e}", exc_info=True)
 
     def _save_report_as_backup_file(self, report_uuid: str, content: str, report_type: str):
         """在数据库保存失败时，将报告保存为本地文件作为备份。"""

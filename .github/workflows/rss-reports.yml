@@ -44,6 +44,9 @@ jobs:
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+      # --- Notion集成配置 (可选) ---
+      NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -89,6 +92,9 @@ jobs:
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+      # --- Notion集成配置 (可选) ---
+      NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -134,6 +140,9 @@ jobs:
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+      # --- Notion集成配置 (可选) ---
+      NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -179,6 +188,9 @@ jobs:
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
+      # --- Notion集成配置 (可选) ---
+      NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

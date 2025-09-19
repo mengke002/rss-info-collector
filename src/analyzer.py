@@ -13,6 +13,7 @@ import pymysql
 from .config import config
 from .database import DatabaseManager
 from .llm_client import call_llm
+from .notion_client import notion_client
 
 logger = logging.getLogger(__name__)
 
@@ -2311,9 +2312,38 @@ class CommunityDeepAnalyzer:
             
             report_id = self.db_manager.save_synthesis_report(report_data)
             logger.info(f"自定义筛选综合洞察报告生成成功，报告ID: {report_id}")
-            
+
+            # 推送到 Notion
+            self._push_synthesis_report_to_notion(synthesis_content, report_id)
+
             return report_id
             
         except Exception as e:
             logger.error(f"生成综合洞察报告失败: {e}")
             return None
+
+    def _push_synthesis_report_to_notion(self, report_content: str, report_id: int):
+        """将社区综合洞察报告推送到 Notion"""
+        try:
+            # 从报告内容中提取标题
+            lines = report_content.split('\n')
+            report_title = "独立开发者社区洞察报告"
+            for line in lines:
+                if line.startswith('# '):
+                    report_title = line[2:].strip()
+                    break
+
+            logger.info(f"开始推送社区洞察报告到 Notion: {report_title}")
+
+            result = notion_client.create_report_page(report_title, report_content)
+
+            if result.get('success'):
+                if result.get('skipped'):
+                    logger.info(f"报告已存在于 Notion，跳过推送: {result.get('page_url')}")
+                else:
+                    logger.info(f"社区洞察报告成功推送到 Notion: {result.get('page_url')}")
+            else:
+                logger.error(f"推送社区洞察报告到 Notion 失败: {result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"推送社区洞察报告到 Notion 时出错: {e}", exc_info=True)
