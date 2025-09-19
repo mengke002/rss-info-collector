@@ -386,9 +386,10 @@ class NotionClient:
 
         return rich_text
 
-    def markdown_to_notion_blocks(self, markdown_content: str) -> List[Dict]:
+    def markdown_to_notion_blocks(self, markdown_content: str) -> tuple[List[Dict], List[Dict]]:
         """将Markdown内容转换为Notion块，支持链接和格式"""
         blocks = []
+        tables_to_add = []  # 用于跟踪需要添加的表格
         lines = markdown_content.split('\n')
 
         i = 0
@@ -470,15 +471,31 @@ class NotionClient:
                         })
                 # 表格处理 - RSS报告中有表格内容
                 elif '|' in line and line.count('|') >= 2:
-                    # 简单的表格行处理，转换为段落
-                    table_content = line.replace('|', ' | ')
-                    blocks.append({
-                        "object": "block",
-                        "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": self._parse_rich_text(table_content)
-                        }
-                    })
+                    # 收集完整的表格
+                    table_lines = []
+                    table_start = i
+
+                    # 收集所有表格行
+                    while i < len(lines):
+                        current_line = lines[i].strip()
+                        if '|' in current_line and current_line.count('|') >= 2:
+                            table_lines.append(current_line)
+                        elif current_line == '':
+                            # 空行，继续收集
+                            pass
+                        else:
+                            # 非表格行，退出
+                            break
+                        i += 1
+
+                    # 回退一行，因为外层循环会自增
+                    i -= 1
+
+                    # 处理收集到的表格
+                    if table_lines:
+                        self._process_table_to_blocks(table_lines, blocks, tables_to_add)
+
+                    continue
                 # 普通段落
                 else:
                     # 处理可能的多行段落
@@ -513,7 +530,198 @@ class NotionClient:
 
             i += 1
 
-        return blocks
+        return blocks, tables_to_add
+
+    def _process_table_to_blocks(self, table_lines: List[str], blocks: List[Dict], tables_to_add: List[Dict]):
+        """将表格行转换为 Notion 真实表格"""
+        if not table_lines:
+            return
+
+        # 解析表格数据
+        table_rows = []
+        headers = None
+
+        for line in table_lines:
+            # 清理表格行
+            cleaned_line = line.strip()
+            if not cleaned_line:
+                continue
+
+            # 跳过分隔行 (如 |---|---|---|)
+            # 检查是否所有单元格都只包含 - 字符
+            cells_check = [cell.strip() for cell in cleaned_line.split('|')[1:-1]]
+            is_separator = True
+            for cell in cells_check:
+                if cell and not all(c in '-: ' for c in cell):
+                    is_separator = False
+                    break
+
+            if is_separator and cells_check:
+                continue
+
+            # 分割单元格
+            cells = [cell.strip() for cell in cleaned_line.split('|')[1:-1]]  # 去掉首尾空元素
+
+            if cells and any(cell for cell in cells):  # 确保不是空行
+                if headers is None:
+                    headers = cells
+                else:
+                    table_rows.append(cells)
+
+        # 如果没有有效数据，跳过
+        if not headers or not table_rows:
+            return
+
+        # 确定表格宽度
+        table_width = len(headers)
+
+        # 对于大表格（>99行），分块处理（Notion API限制每个表格最多100行包括标题）
+        if len(table_rows) > 99:
+            self.logger.info(f"表格行数({len(table_rows)})超过Notion限制，将分块显示")
+            self._create_chunked_tables(headers, table_rows, blocks, 99, tables_to_add)
+        else:
+            # 创建单个表格
+            self._create_single_notion_table(headers, table_rows, blocks, tables_to_add)
+
+    def _create_single_notion_table(self, headers: List[str], table_rows: List[List[str]], blocks: List[Dict], tables_to_add: List[Dict]):
+        """创建单个Notion原生表格，使用分步方法
+
+        1. 先记录表格信息，稍后通过API添加
+        2. 目前先添加占位符
+        """
+        try:
+            self.logger.info(f"准备创建Notion真实表格（{len(table_rows)}行数据）")
+
+            # 添加表格占位符
+            table_placeholder = {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": f"📊 表格数据（{len(table_rows)}行，{len(headers)}列）"},
+                        "annotations": {"bold": True, "color": "blue"}
+                    }]
+                }
+            }
+            blocks.append(table_placeholder)
+
+            # 记录表格信息到单独的列表中
+            tables_to_add.append({
+                "headers": headers,
+                "rows": table_rows,
+                "placeholder_index": len(blocks) - 1  # 记录占位符在blocks中的位置
+            })
+
+        except Exception as e:
+            self.logger.error(f"准备表格创建失败: {e}")
+            # 回退到代码块方案
+            self.logger.info("回退到代码块方案")
+            self._create_table_as_code_block(headers, table_rows, blocks)
+
+    def _create_table_as_code_block(self, headers: List[str], table_rows: List[List[str]], blocks: List[Dict]):
+        """将表格转换为代码块显示（回退方案）"""
+        try:
+            # 重建表格文本
+            table_text = ""
+
+            # 添加标题行
+            header_line = "| " + " | ".join(headers) + " |"
+            separator_line = "|" + "|".join(["-" * (len(h) + 2) for h in headers]) + "|"
+            table_text += header_line + "\n" + separator_line + "\n"
+
+            # 添加数据行
+            for row in table_rows:
+                # 确保行有足够的单元格
+                while len(row) < len(headers):
+                    row.append("")
+
+                # 限制单元格长度
+                display_row = []
+                for cell in row[:len(headers)]:
+                    cell_content = cell or ""
+                    if len(cell_content) > 100:  # 代码块中长度限制
+                        cell_content = cell_content[:97] + "..."
+                    display_row.append(cell_content)
+
+                row_line = "| " + " | ".join(display_row) + " |"
+                table_text += row_line + "\n"
+
+            # 添加代码块
+            blocks.append({
+                "object": "block",
+                "type": "code",
+                "code": {
+                    "caption": [],
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": table_text}
+                    }],
+                    "language": "markdown"
+                }
+            })
+
+            # 添加说明
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": f"📋 表格包含 {len(table_rows)} 行数据（代码块格式）"},
+                        "annotations": {"italic": True, "color": "gray"}
+                    }]
+                }
+            })
+
+        except Exception as e:
+            self.logger.error(f"创建表格代码块失败: {e}")
+            # 最终回退：添加错误提示
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": "⚠️ 表格数据处理失败，请查看原始报告"},
+                        "annotations": {"italic": True, "color": "red"}
+                    }]
+                }
+            })
+
+    def _create_chunked_tables(self, headers: List[str], table_rows: List[List[str]], blocks: List[Dict], chunk_size: int, tables_to_add: List[Dict]):
+        """将大表格分成多个小表格显示"""
+        total_rows = len(table_rows)
+        chunks = [table_rows[i:i + chunk_size] for i in range(0, total_rows, chunk_size)]
+
+        # 添加说明
+        blocks.append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [{
+                    "type": "text",
+                    "text": {"content": f"📊 表格包含 {total_rows} 行，分为 {len(chunks)} 个部分显示："},
+                    "annotations": {"bold": True}
+                }]
+            }
+        })
+
+        for chunk_idx, chunk in enumerate(chunks):
+            # 为每个分块添加标题
+            blocks.append({
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": {
+                    "rich_text": [{
+                        "type": "text",
+                        "text": {"content": f"第 {chunk_idx + 1} 部分 (第 {chunk_idx * chunk_size + 1}-{min((chunk_idx + 1) * chunk_size, total_rows)} 行)"}
+                    }]
+                }
+            })
+
+            # 创建这个分块的表格
+            self._create_single_notion_table(headers, chunk, blocks, tables_to_add)
 
     def _create_large_content_page(self, parent_page_id: str, page_title: str,
                                   content_blocks: List[Dict]) -> Dict[str, Any]:
@@ -578,6 +786,110 @@ class NotionClient:
         except Exception as e:
             self.logger.error(f"追加内容块时出错: {e}")
             return {"success": False, "error": str(e)}
+
+    def _add_real_table_to_page(self, page_id: str, headers: List[str], table_rows: List[List[str]]) -> bool:
+        """向已创建的页面添加真实表格
+
+        Args:
+            page_id: 页面ID
+            headers: 表格标题行
+            table_rows: 表格数据行
+
+        Returns:
+            是否成功添加表格
+        """
+        try:
+            import requests
+            import json
+
+            # 限制表格大小，避免API请求过大（Notion限制表格最多100行包括标题）
+            max_rows = 99  # 99行数据 + 1行标题 = 100行总计
+            if len(table_rows) > max_rows:
+                self.logger.info(f"表格行数({len(table_rows)})超过Notion限制({max_rows})，只添加前{max_rows}行")
+                table_rows = table_rows[:max_rows]
+
+            # 构建表格行数据
+            table_children = []
+
+            # 添加标题行
+            header_cells = []
+            for header in headers:
+                header_cells.append([{
+                    "type": "text",
+                    "text": {"content": header or ""}
+                }])
+
+            table_children.append({
+                "type": "table_row",
+                "table_row": {
+                    "cells": header_cells
+                }
+            })
+
+            # 添加数据行
+            for row in table_rows:
+                # 确保行有足够的单元格
+                while len(row) < len(headers):
+                    row.append("")
+
+                # 准备单元格数据
+                row_cells = []
+                for cell in row[:len(headers)]:  # 确保不超过表格宽度
+                    # 处理空值和长内容
+                    cell_content = cell or ""
+                    if len(cell_content) > 200:  # 限制单元格内容长度
+                        cell_content = cell_content[:197] + "..."
+
+                    row_cells.append([{
+                        "type": "text",
+                        "text": {"content": cell_content}
+                    }])
+
+                table_children.append({
+                    "type": "table_row",
+                    "table_row": {
+                        "cells": row_cells
+                    }
+                })
+
+            # 构建API请求
+            url = f"{self.base_url}/blocks/{page_id}/children"
+            headers_req = self._get_headers()
+
+            table_block = {
+                "children": [
+                    {
+                        "object": "block",
+                        "type": "table",
+                        "table": {
+                            "table_width": len(headers),
+                            "has_column_header": True,
+                            "has_row_header": False,
+                            "children": table_children
+                        }
+                    }
+                ]
+            }
+
+            # 发送PATCH请求
+            response = requests.patch(url, headers=headers_req, data=json.dumps(table_block), timeout=30)
+            response.raise_for_status()
+
+            self.logger.info(f"真实表格添加成功 ({len(table_rows)}行数据)")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"添加真实表格失败: {e}")
+            try:
+                if hasattr(e, 'response') and e.response is not None:
+                    error_detail = e.response.json()
+                    self.logger.error(f"API错误详情: {error_detail}")
+            except:
+                pass
+            return False
+        except Exception as e:
+            self.logger.error(f"添加真实表格时出现异常: {e}")
+            return False
 
     def _extract_report_date_and_type(self, report_title: str, report_content: str) -> tuple[datetime, str]:
         """从报告标题和内容中提取报告日期和类型"""
@@ -696,7 +1008,7 @@ class NotionClient:
                 }
 
             # 4. 在日期页面下创建报告页面
-            content_blocks = self.markdown_to_notion_blocks(report_content)
+            content_blocks, tables_to_add = self.markdown_to_notion_blocks(report_content)
 
             # 虽然API单次请求限制100块，但我们可以分批处理更多内容
             max_blocks = 1000
@@ -756,6 +1068,23 @@ class NotionClient:
             if create_result.get("success"):
                 page_id = create_result["data"]["id"]
                 page_url = f"https://www.notion.so/{page_id.replace('-', '')}"
+
+                # 检查是否有需要添加的表格
+                if tables_to_add:
+                    self.logger.info(f"页面创建成功，开始添加 {len(tables_to_add)} 个真实表格")
+                    success_count = 0
+                    for i, table_info in enumerate(tables_to_add):
+                        try:
+                            if self._add_real_table_to_page(page_id, table_info["headers"], table_info["rows"]):
+                                success_count += 1
+                                self.logger.info(f"真实表格 {i+1}/{len(tables_to_add)} 添加成功")
+                            else:
+                                self.logger.warning(f"真实表格 {i+1}/{len(tables_to_add)} 添加失败，但页面已创建")
+                        except Exception as e:
+                            self.logger.error(f"添加真实表格 {i+1} 时出错: {e}")
+
+                    if success_count > 0:
+                        self.logger.info(f"成功添加 {success_count}/{len(tables_to_add)} 个真实表格")
 
                 self.logger.info(f"报告页面创建成功: {page_url}")
                 return {
