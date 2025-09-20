@@ -186,25 +186,28 @@ class NotionClient:
             self.logger.error(f"查找或创建日期页面时出错: {e}")
             return None
 
-    def check_report_exists(self, day_page_id: str, report_title: str) -> Optional[Dict[str, Any]]:
-        """检查报告是否已经存在"""
+    def check_report_exists(self, day_page_id: str, report_title: str, report_type: str = None) -> Optional[Dict[str, Any]]:
+        """检查报告是否已经存在，只进行完全匹配检测"""
         try:
             # 获取日期页面的子页面
             children_result = self.get_page_children(day_page_id)
             if not children_result.get("success"):
                 return None
 
-            # 查找同名报告
+            # 只查找完全同名的报告
             for child in children_result["data"].get("results", []):
                 if child.get("type") == "child_page":
                     page_title = self._extract_page_title(child)
+
+                    # 只进行完全匹配检测
                     if page_title == report_title:
                         page_id = child["id"]
                         page_url = f"https://www.notion.so/{page_id.replace('-', '')}"
                         return {
                             "exists": True,
                             "page_id": page_id,
-                            "page_url": page_url
+                            "page_url": page_url,
+                            "match_type": "exact"
                         }
 
             return {"exists": False}
@@ -1005,21 +1008,24 @@ class NotionClient:
                 # 如果提供了日期，仍需要提取类型
                 _, report_type = self._extract_report_date_and_type(report_title, report_content)
 
+            # 获取当前实际执行时间（北京时间）
+            current_time = datetime.now(timezone(timedelta(hours=8)))
+
             # 格式化报告标题，添加类型前缀
-            # 对于可能有重复的报告类型，添加时间戳避免冲突
+            # 对于可能有重复的报告类型，添加实际执行时间戳避免冲突
             if report_type in ["科技新闻", "社区洞察"]:
-                # 这些类型每天可能有多个报告，需要添加时间戳
-                beijing_time_str = report_date.strftime('%H:%M')
-                formatted_title = f"[{report_type}] {report_title} [{beijing_time_str}]"
+                # 这些类型每天可能有多个报告，使用实际执行时间作为时间戳
+                execution_time_str = current_time.strftime('%H:%M')
+                formatted_title = f"[{report_type}] {report_title} [{execution_time_str}]"
             elif report_type == "产品发现":
                 # 产品发现报告：检查是否包含周报/日报标识，如果没有则添加时间戳
                 if "周报" in report_title or "日报" in report_title or "weekly" in report_title.lower() or "daily" in report_title.lower():
                     # 已经有周期标识，不需要时间戳
                     formatted_title = f"[{report_type}] {report_title}"
                 else:
-                    # 没有周期标识，添加时间戳避免冲突
-                    beijing_time_str = report_date.strftime('%H:%M')
-                    formatted_title = f"[{report_type}] {report_title} [{beijing_time_str}]"
+                    # 没有周期标识，使用实际执行时间作为时间戳避免冲突
+                    execution_time_str = current_time.strftime('%H:%M')
+                    formatted_title = f"[{report_type}] {report_title} [{execution_time_str}]"
             else:
                 # 其他类型正常处理
                 formatted_title = f"[{report_type}] {report_title}"
@@ -1046,7 +1052,7 @@ class NotionClient:
                 return {"success": False, "error": "无法创建日期页面"}
 
             # 3.5. 检查报告是否已经存在
-            existing_report = self.check_report_exists(day_page_id, formatted_title)
+            existing_report = self.check_report_exists(day_page_id, formatted_title, report_type)
             if existing_report and existing_report.get("exists"):
                 self.logger.info(f"报告已存在，跳过创建: {existing_report.get('page_url')}")
                 return {
