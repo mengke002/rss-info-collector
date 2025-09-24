@@ -1073,6 +1073,9 @@ class TechNewsAnalyzer:
             # 3. 第二层：调用新的报告生成方法，生成完整的Markdown报告
             report_generation = self.generate_full_report(analysis_results, hours_back)
 
+            raw_model_reports = report_generation.get('model_reports', [])
+            sanitized_model_reports = self._sanitize_model_reports(raw_model_reports)
+
             if not report_generation.get('success'):
                 logger.warning(
                     "生成完整报告失败: %s",
@@ -1082,11 +1085,12 @@ class TechNewsAnalyzer:
                     'success': False,
                     'message': report_generation.get('error', '生成完整报告失败'),
                     'full_report': None,
-                    'model_reports': self._sanitize_model_reports(report_generation.get('model_reports', [])),
+                    'model_reports': sanitized_model_reports,
+                    'model_reports_full': raw_model_reports,
                     'failures': report_generation.get('failures', [])
                 }
 
-            model_reports = report_generation.get('model_reports', [])
+            model_reports = raw_model_reports
             if not model_reports:
                 logger.warning("所有模型生成完整报告失败")
                 return {
@@ -1094,10 +1098,13 @@ class TechNewsAnalyzer:
                     'message': '所有模型生成完整报告失败',
                     'full_report': None,
                     'model_reports': [],
+                    'model_reports_full': [],
                     'failures': report_generation.get('failures', [])
                 }
 
             primary_report = model_reports[0]
+
+            sanitized_model_reports = self._sanitize_model_reports(model_reports)
 
             # 4. 构建最终结果
             final_result = {
@@ -1106,7 +1113,8 @@ class TechNewsAnalyzer:
                 'total_articles_found': len(articles),
                 'successful_analysis_count': len(analysis_results),
                 'full_report': primary_report.get('content') if config.should_log_report_preview() else None,
-                'model_reports': self._sanitize_model_reports(model_reports),
+                'model_reports': sanitized_model_reports,
+                'model_reports_full': model_reports,
                 'failures': report_generation.get('failures', []),
                 'generated_at': datetime.now().isoformat()
             }

@@ -504,7 +504,10 @@ def run_tech_news_analysis_task(db_manager: DatabaseManager, hours_back: int = 2
         
         # 运行分析
         result = analyzer.run_tech_news_analysis(hours_back)
-        
+
+        if not config.should_log_report_preview():
+            result.pop('model_reports_full', None)
+
         if result.get('success', False):
             logger.info(f"科技新闻分析完成 - 找到 {result.get('total_articles_found', 0)} 篇文章，成功分析 {result.get('successful_analysis_count', 0)} 篇")
         else:
@@ -593,12 +596,13 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
             sanitized_result = dict(analysis_result)
             if 'model_reports' in sanitized_result:
                 sanitized_result['model_reports'] = TechNewsAnalyzer._sanitize_model_reports(
-                    sanitized_result.get('model_reports', [])
+                    sanitized_result.get('model_reports_full') or sanitized_result.get('model_reports', [])
                 )
+            sanitized_result.pop('model_reports_full', None)
             sanitized_result['full_report'] = None
             return sanitized_result
 
-        model_reports = analysis_result.get('model_reports', [])
+        model_reports = analysis_result.get('model_reports_full') or analysis_result.get('model_reports', [])
         analysis_failures = analysis_result.get('failures', [])
 
         if not model_reports:
@@ -610,6 +614,7 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
             }
             if not include_preview:
                 failure_payload['model_reports'] = TechNewsAnalyzer._sanitize_model_reports(model_reports)
+                failure_payload.pop('model_reports_full', None)
                 failure_payload['full_report'] = None
             return failure_payload
 
@@ -670,6 +675,8 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
         overall_success = len(persisted_reports) > 0
         primary_report_uuid = persisted_reports[0]['report_uuid'] if overall_success else None
 
+        sanitized_model_reports = TechNewsAnalyzer._sanitize_model_reports(model_reports)
+
         result_payload = {
             'success': overall_success,
             'reports': persisted_reports,
@@ -677,8 +684,11 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
             'generation_failures': generation_failures,
             'full_report': analysis_result.get('full_report') if include_preview else None,
             'primary_report_uuid': primary_report_uuid,
-            'model_reports': model_reports if include_preview else TechNewsAnalyzer._sanitize_model_reports(model_reports)
+            'model_reports': model_reports if include_preview else sanitized_model_reports
         }
+
+        if include_preview:
+            result_payload['model_reports_full'] = model_reports
 
         return result_payload
 
