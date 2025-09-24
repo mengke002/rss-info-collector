@@ -2496,6 +2496,7 @@ class CommunityDeepAnalyzer:
                 [meta['display'] for meta in models_meta]
             )
 
+            include_preview = config.should_log_report_preview()
             successes: Dict[int, Dict[str, Any]] = {}
             failures: List[Dict[str, Any]] = []
 
