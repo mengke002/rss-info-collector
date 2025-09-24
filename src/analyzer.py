@@ -12,7 +12,7 @@ import pymysql
 
 from .config import config
 from .database import DatabaseManager
-from .llm_client import call_llm
+from .llm_client import call_llm, get_report_model_names, LLMClient
 from .notion_client import notion_client
 
 logger = logging.getLogger(__name__)
@@ -629,6 +629,18 @@ class TechNewsAnalyzer:
         self.max_workers = config.get_max_workers()
         logger.info(f"科技新闻分析器初始化完成 - 最大并发数: {self.max_workers}")
 
+    @staticmethod
+    def _sanitize_model_reports(model_reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """根据配置决定是否返回包含正文的模型报告"""
+        if config.should_log_report_preview():
+            return model_reports
+
+        sanitized: List[Dict[str, Any]] = []
+        for report in model_reports or []:
+            if isinstance(report, dict):
+                sanitized.append({k: v for k, v in report.items() if k != 'content'})
+        return sanitized
+
     def get_tech_news_articles(self, hours_back: int = 24) -> List[Dict[str, Any]]:
         """
         获取指定时间范围内的科技新闻文章
@@ -1059,27 +1071,52 @@ class TechNewsAnalyzer:
                 }
             
             # 3. 第二层：调用新的报告生成方法，生成完整的Markdown报告
-            full_report_md = self.generate_full_report(analysis_results, hours_back)
-            
-            if not full_report_md:
-                logger.warning("生成完整报告失败")
+            report_generation = self.generate_full_report(analysis_results, hours_back)
+
+            if not report_generation.get('success'):
+                logger.warning(
+                    "生成完整报告失败: %s",
+                    report_generation.get('error', '未知原因')
+                )
+            return {
+                'success': False,
+                'message': report_generation.get('error', '生成完整报告失败'),
+                'full_report': None,
+                'model_reports': self._sanitize_model_reports(report_generation.get('model_reports', [])),
+                'failures': report_generation.get('failures', [])
+            }
+
+            model_reports = report_generation.get('model_reports', [])
+            if not model_reports:
+                logger.warning("所有模型生成完整报告失败")
                 return {
                     'success': False,
-                    'message': '生成完整报告失败',
-                    'full_report': None
+                    'message': '所有模型生成完整报告失败',
+                    'full_report': None,
+                    'model_reports': [],
+                    'failures': report_generation.get('failures', [])
                 }
-            
+
+            primary_report = model_reports[0]
+
             # 4. 构建最终结果
             final_result = {
                 'success': True,
                 'analysis_period': f'过去{hours_back}小时',
                 'total_articles_found': len(articles),
                 'successful_analysis_count': len(analysis_results),
-                'full_report': full_report_md,
+                'full_report': primary_report.get('content') if config.should_log_report_preview() else None,
+                'model_reports': self._sanitize_model_reports(model_reports),
+                'failures': report_generation.get('failures', []),
                 'generated_at': datetime.now().isoformat()
             }
             
-            logger.info(f"科技新闻分析完成 - 分析 {len(articles)} 篇文章，成功 {len(analysis_results)} 篇，已生成完整报告")
+            logger.info(
+                "科技新闻分析完成 - 分析 %s 篇文章，成功 %s 篇，生成 %s 份完整报告",
+                len(articles),
+                len(analysis_results),
+                len(model_reports)
+            )
             return final_result
             
         except Exception as e:
@@ -1090,41 +1127,51 @@ class TechNewsAnalyzer:
                 'full_report': None
             }
 
-    def generate_full_report(self, analysis_results: List[Dict[str, Any]], hours_back: int = 24) -> Optional[str]:
-        """
-        第二层LLM：综合分析与报告生成
-        基于第一层分析的结构化数据，生成完整的Markdown报告
-        
-        Args:
-            analysis_results: 第一层分析的结果列表
-            hours_back: 分析时间范围（小时）
-            
-        Returns:
-            完整的Markdown报告字符串，如果失败则返回None
-        """
+    def _resolve_report_models(self) -> List[Dict[str, str]]:
+        """获取执行最终报告生成时需要使用的模型信息"""
+        resolved_models: List[Dict[str, str]] = []
+        configured_models = get_report_model_names()
+
+        if not configured_models:
+            try:
+                fallback = config.get_llm_config().get('smart_model_name')
+                if fallback:
+                    configured_models = [fallback]
+            except Exception as exc:
+                logger.warning(f"读取LLM配置失败: {exc}")
+
+        for model_name in configured_models:
+            display_name = LLMClient.get_model_display_name(model_name)
+            if not any(item['model'] == model_name for item in resolved_models):
+                resolved_models.append({'model': model_name, 'display': display_name})
+
+        return resolved_models
+
+    def generate_full_report(self, analysis_results: List[Dict[str, Any]], hours_back: int = 24) -> Dict[str, Any]:
+        """并行调用多个模型生成完整报告"""
         if not analysis_results:
             logger.warning("没有分析结果，无法生成报告")
-            return None
-        
+            return {
+                'success': False,
+                'error': '没有分析结果',
+                'model_reports': [],
+                'failures': []
+            }
+
         try:
-            # 将analysis_results转换为JSON字符串，用于传递给LLM
-            structured_data = []
-            for result in analysis_results:
-                structured_data.append({
-                    "title": result.get('title', ''),
-                    "link": result.get('link', ''),
-                    "source": result.get('source', ''),
-                    "summary": result.get('summary', ''),
-                    "key_points": result.get('key_points', []),
-                    "event_type": result.get('event_type', ''),
-                    "potential_impact": result.get('potential_impact', '')
-                })
-            
-            # 构建当前日期
+            structured_data = [{
+                "title": result.get('title', ''),
+                "link": result.get('link', ''),
+                "source": result.get('source', ''),
+                "summary": result.get('summary', ''),
+                "key_points": result.get('key_points', []),
+                "event_type": result.get('event_type', ''),
+                "potential_impact": result.get('potential_impact', '')
+            } for result in analysis_results]
+
             from datetime import datetime
             current_date = datetime.now().strftime('%Y-%m-%d')
-            
-            # 构建第二层LLM的Prompt
+
             prompt = f"""
 你是一位资深的科技行业分析师和报告撰写专家，任职于顶尖的分析机构。你的任务是基于提供的一系列科技新闻的结构化信息，撰写一份全面、深入、结构清晰的洞察报告。
 
@@ -1140,7 +1187,7 @@ class TechNewsAnalyzer:
 
 # 科技新闻洞察报告 ({current_date})
 
-> 核心提要: (在这里写一段高度浓缩的、吸引人的导语，约100-150字。点明本次报告期内最重要的趋势、最值得关注的事件，并抛出核心观点。例如："本期科技界风起云涌，AI领域的军备竞赛进入新阶段，而资本市场则对XX赛道展现出前所未有的热情。本报告将为您深度解读这些表象之下的战略意图与未来机遇。")
+> 核心提要: (在这里写一段高度浓缩的、吸引人的导语，约200字。点明本次报告期内最重要的趋势、最值得关注的事件，并抛出核心观点。例如："本期科技界风起云涌，AI领域的军备竞赛进入新阶段，而资本市场则对XX赛道展现出前所未有的热情。本报告将为您深度解读这些表象之下的战略意图与未来机遇。")
 
 ## 一、关键新闻速览 (Facts First)
 
@@ -1184,26 +1231,130 @@ class TechNewsAnalyzer:
 
 请确保报告内容具有前瞻性、洞察性，避免简单的事实罗列，要有深度思考和独到见解。
 """
-            
-            # 调用smart_model生成报告
-            response = call_llm(prompt, model_type='smart')
-            
-            if not response.get('success', False):
-                logger.error(f"生成完整报告失败: {response.get('error', 'Unknown error')}")
-                return None
-            
-            full_report = response.get('content', '').strip()
-            
-            if not full_report:
-                logger.warning("LLM返回了空的报告内容")
-                return None
-            
-            logger.info(f"成功生成完整报告，长度: {len(full_report)} 字符")
-            return full_report
-            
+
+            models_meta = self._resolve_report_models()
+            if not models_meta:
+                error_msg = '未找到可用的报告模型'
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'model_reports': [],
+                    'failures': []
+                }
+
+            logger.info(
+                "准备并行生成科技新闻报告，模型列表: %s",
+                [meta['display'] for meta in models_meta]
+            )
+
+            successes: Dict[int, Dict[str, Any]] = {}
+            failures: List[Dict[str, Any]] = []
+
+            def _run_single_model(index: int, model_name: str, display_name: str) -> Dict[str, Any]:
+                try:
+                    llm_temperature = 0.5
+                    response = call_llm(
+                        prompt,
+                        model_type='smart',
+                        temperature=llm_temperature,
+                        model_override=model_name
+                    )
+
+                    if not response.get('success'):
+                        return {
+                            'success': False,
+                            'error': response.get('error', 'LLM调用失败'),
+                            'model': model_name,
+                            'model_display': display_name
+                        }
+
+                    full_report = (response.get('content') or '').strip()
+                    if not full_report:
+                        return {
+                            'success': False,
+                            'error': 'LLM返回空内容',
+                            'model': model_name,
+                            'model_display': display_name
+                        }
+
+                    return {
+                        'success': True,
+                        'model': model_name,
+                        'model_display': display_name,
+                        'content': full_report,
+                        'provider': response.get('provider', 'openai_compatible'),
+                        'temperature': llm_temperature,
+                        'prompt_length': len(prompt)
+                    }
+                except Exception as exc:
+                    return {
+                        'success': False,
+                        'error': str(exc),
+                        'model': model_name,
+                        'model_display': display_name
+                    }
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(models_meta), 4) or 1) as executor:
+                future_map = {}
+                for idx, meta in enumerate(models_meta):
+                    future = executor.submit(_run_single_model, idx, meta['model'], meta['display'])
+                    future_map[future] = (idx, meta)
+
+                for future in concurrent.futures.as_completed(future_map):
+                    idx, meta = future_map[future]
+                    try:
+                        model_result = future.result()
+                        if model_result.get('success'):
+                            successes[idx] = model_result
+                            logger.info(
+                                "模型 %s 报告生成完成 (长度: %s)",
+                                meta['display'],
+                                len(model_result.get('content', ''))
+                            )
+                        else:
+                            error_msg = model_result.get('error', '报告生成失败')
+                            logger.warning(
+                                "模型 %s 报告生成失败: %s",
+                                meta['display'],
+                                error_msg
+                            )
+                            failures.append({
+                                'model': meta['model'],
+                                'model_display': meta['display'],
+                                'error': error_msg
+                            })
+                    except Exception as exc:
+                        logger.error(
+                            "模型 %s 报告生成出现未处理异常: %s",
+                            meta['display'],
+                            exc
+                        )
+                        failures.append({
+                            'model': meta['model'],
+                            'model_display': meta['display'],
+                            'error': str(exc)
+                        })
+
+            ordered_successes = [successes[idx] for idx in sorted(successes.keys())]
+            overall_success = len(ordered_successes) > 0
+
+            return {
+                'success': overall_success,
+                'model_reports': ordered_successes,
+                'failures': failures,
+                'prompt_length': len(prompt),
+                'model_count_requested': len(models_meta)
+            }
+
         except Exception as e:
             logger.error(f"生成完整报告时出现异常: {e}")
-            return None
+            return {
+                'success': False,
+                'error': str(e),
+                'model_reports': [],
+                'failures': []
+            }
     
     def generate_comprehensive_insights(self, analysis_results: List[Dict[str, Any]], 
                                       time_period: str = "过去24小时") -> Dict[str, Any]:
@@ -1887,6 +2038,42 @@ class CommunityDeepAnalyzer:
         self.max_workers = config.get_max_workers()
         logger.info(f"深度内容与社区讨论分析器初始化完成 - 最大并发数: {self.max_workers}")
 
+    def _resolve_report_models(self) -> List[Dict[str, str]]:
+        """获取用于综合洞察报告生成的模型列表"""
+        resolved_models: List[Dict[str, str]] = []
+        configured_models = get_report_model_names()
+
+        if not configured_models:
+            try:
+                fallback = config.get_llm_config().get('smart_model_name')
+                if fallback:
+                    configured_models = [fallback]
+            except Exception as exc:
+                logger.warning(f"读取LLM配置失败: {exc}")
+
+        for model_name in configured_models:
+            display_name = LLMClient.get_model_display_name(model_name)
+            if not any(item['model'] == model_name for item in resolved_models):
+                resolved_models.append({'model': model_name, 'display': display_name})
+
+        return resolved_models
+
+    def _build_info_summary_section(self, analyzed_articles: List[Dict[str, Any]]) -> str:
+        """构建资讯速览Markdown片段"""
+        info_summary_md = "## 📰 本周资讯速览\n\n"
+
+        if not analyzed_articles:
+            info_summary_md += "- 暂无资讯\n"
+            return info_summary_md
+
+        for article in analyzed_articles:
+            title = article.get('title', '无标题')
+            link = article.get('link', '#')
+            source_table = article.get('source_table', 'unknown').replace('rss_', '')
+            info_summary_md += f"* **[{source_table}]** [{title}]({link})\n"
+
+        return info_summary_md
+
     def analyze_single_article_deeply(self, article: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         对单篇文章进行深度解析
@@ -2031,15 +2218,7 @@ class CommunityDeepAnalyzer:
                 return None
 
             # --- 步骤1: 预生成资讯速览 ---
-            info_summary_md = "## 📰 本周资讯速览\n\n"
-            if not analyzed_articles:
-                info_summary_md += "- 暂无资讯\n"
-            else:
-                for article in analyzed_articles:
-                    title = article.get('title', '无标题')
-                    link = article.get('link', '#')
-                    source_table = article.get('source_table', 'unknown').replace('rss_', '')
-                    info_summary_md += f"* **[{source_table}]** [{title}]({link})\n"
+            info_summary_md = self._build_info_summary_section(analyzed_articles)
             # --- 预生成结束 ---
 
             # 构建综合分析prompt
@@ -2250,81 +2429,245 @@ class CommunityDeepAnalyzer:
             logger.error(f"批量深度分析处理失败: {e}")
             return 0
 
-    def generate_synthesis_report(self, days: int = 7, indiehackers_hours: int = None, 
-                                ezindie_limit: int = None) -> Optional[int]:
-        """
-        生成综合洞察报告
-        
-        Args:
-            days: 分析过去多少天的数据（默认筛选条件）
-            indiehackers_hours: indiehackers 数据的小时限制（如：48小时）
-            ezindie_limit: ezindie 数据的文章数量限制（如：最新1篇）
-            
-        Returns:
-            报告ID，失败返回None
-        """
+    def generate_synthesis_report(self, days: int = 7, indiehackers_hours: int = None,
+                                ezindie_limit: int = None) -> Dict[str, Any]:
+        """生成社区综合洞察报告，支持多模型并行生成"""
         try:
-            # 获取已分析的文章（使用新的筛选参数）
             analyzed_articles = self.db_manager.get_analyzed_articles_for_synthesis(
                 days=days,
                 indiehackers_hours=indiehackers_hours,
                 ezindie_limit=ezindie_limit
             )
-            
+
             if not analyzed_articles:
-                logger.warning(f"没有符合条件的已分析文章，无法生成综合报告")
-                logger.info(f"筛选条件: indiehackers={indiehackers_hours}小时, ezindie=最新{ezindie_limit}篇, 默认={days}天")
-                return None
-            
-            # 按来源统计文章
+                logger.warning("没有符合条件的已分析文章，无法生成综合报告")
+                logger.info(
+                    "筛选条件: indiehackers=%s小时, ezindie=最新%s篇, 默认=%s天",
+                    indiehackers_hours,
+                    ezindie_limit,
+                    days
+                )
+                return {
+                    'success': False,
+                    'reports': [],
+                    'failures': [],
+                    'message': '没有符合条件的已分析文章'
+                }
+
             indiehackers_count = len([a for a in analyzed_articles if a['source_table'] == 'rss_indiehackers'])
             ezindie_count = len([a for a in analyzed_articles if a['source_table'] == 'rss_ezindie'])
-            
-            logger.info(f"准备生成综合报告: indiehackers {indiehackers_count}篇, ezindie {ezindie_count}篇")
-            
-            # 计算日期范围（基于实际数据的日期范围）
+
+            logger.info(
+                "准备生成综合报告: indiehackers %s 篇, ezindie %s 篇, 总计 %s 篇",
+                indiehackers_count,
+                ezindie_count,
+                len(analyzed_articles)
+            )
+
             from datetime import datetime, timedelta
             end_date = datetime.now().date()
-            
-            # 根据设置确定开始日期
+
             if indiehackers_hours:
                 start_date = (datetime.now() - timedelta(hours=indiehackers_hours)).date()
             else:
                 start_date = end_date - timedelta(days=days)
-            
-            # 生成综合洞察
-            synthesis_content = self.synthesize_weekly_insights(
+
+            info_summary_md = self._build_info_summary_section(analyzed_articles)
+            prompt = self._build_synthesis_prompt(
                 analyzed_articles=analyzed_articles,
                 start_date=start_date.strftime('%Y-%m-%d'),
-                end_date=end_date.strftime('%Y-%m-%d')
+                end_date=end_date.strftime('%Y-%m-%d'),
+                info_summary_md=info_summary_md
             )
-            
-            if not synthesis_content:
-                logger.error("生成综合洞察内容失败")
-                return None
-            
-            # 保存报告
-            report_data = {
-                'report_type': 'community_insights_custom',
-                'start_date': start_date,
-                'end_date': end_date,
-                'content': synthesis_content,
-                'source_article_ids': [article['id'] for article in analyzed_articles]
+
+            models_meta = self._resolve_report_models()
+            if not models_meta:
+                error_msg = '未找到可用的报告模型'
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'reports': [],
+                    'failures': [{'error': error_msg}],
+                    'message': error_msg
+                }
+
+            logger.info(
+                "开始并行生成社区综合报告，模型: %s",
+                [meta['display'] for meta in models_meta]
+            )
+
+            successes: Dict[int, Dict[str, Any]] = {}
+            failures: List[Dict[str, Any]] = []
+
+            def _run_single_model(index: int, model_name: str, display_name: str) -> Dict[str, Any]:
+                try:
+                    temperature = 0.7
+                    response = call_llm(
+                        prompt,
+                        model_type='smart',
+                        temperature=temperature,
+                        model_override=model_name
+                    )
+
+                    if not response.get('success'):
+                        return {
+                            'success': False,
+                            'error': response.get('error', 'LLM调用失败'),
+                            'model': model_name,
+                            'model_display': display_name
+                        }
+
+                    content = (response.get('content') or '').strip()
+                    if not content:
+                        return {
+                            'success': False,
+                            'error': 'LLM返回空内容',
+                            'model': model_name,
+                            'model_display': display_name
+                        }
+
+                    return {
+                        'success': True,
+                        'model': model_name,
+                        'model_display': display_name,
+                        'content': content,
+                        'provider': response.get('provider', 'openai_compatible'),
+                        'temperature': temperature
+                    }
+                except Exception as exc:
+                    return {
+                        'success': False,
+                        'error': str(exc),
+                        'model': model_name,
+                        'model_display': display_name
+                    }
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(models_meta), 4) or 1) as executor:
+                future_map = {}
+                for idx, meta in enumerate(models_meta):
+                    future = executor.submit(_run_single_model, idx, meta['model'], meta['display'])
+                    future_map[future] = (idx, meta)
+
+                for future in concurrent.futures.as_completed(future_map):
+                    idx, meta = future_map[future]
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            successes[idx] = result
+                            logger.info(
+                                "模型 %s 生成综合报告成功，内容长度 %s",
+                                meta['display'],
+                                len(result.get('content', ''))
+                            )
+                        else:
+                            error_msg = result.get('error', '报告生成失败')
+                            logger.warning(
+                                "模型 %s 生成综合报告失败: %s",
+                                meta['display'],
+                                error_msg
+                            )
+                            failures.append({
+                                'model': meta['model'],
+                                'model_display': meta['display'],
+                                'error': error_msg
+                            })
+                    except Exception as exc:
+                        logger.error(
+                            "模型 %s 综合报告生成出现异常: %s",
+                            meta['display'],
+                            exc
+                        )
+                        failures.append({
+                            'model': meta['model'],
+                            'model_display': meta['display'],
+                            'error': str(exc)
+                        })
+
+            ordered_successes = [successes[idx] for idx in sorted(successes.keys())]
+            persisted_reports: List[Dict[str, Any]] = []
+
+            for report_meta in ordered_successes:
+                model_name = report_meta['model']
+                display_name = report_meta['model_display']
+                content = report_meta['content']
+
+                report_type_suffix = model_name.replace('/', '_') if model_name else 'default'
+                report_data = {
+                    'report_type': f'community_insights_custom::{report_type_suffix}',
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'content': content,
+                    'source_article_ids': [article['id'] for article in analyzed_articles]
+                }
+
+                try:
+                    report_id = self.db_manager.save_synthesis_report(report_data)
+                    logger.info(
+                        "综合洞察报告存储成功 - 模型 %s, 报告ID %s",
+                        display_name,
+                        report_id
+                    )
+
+                    notion_result = self._push_synthesis_report_to_notion(
+                        report_content=content,
+                        report_id=report_id,
+                        model_display=display_name
+                    )
+
+                    report_entry = {
+                        'model': model_name,
+                        'model_display': display_name,
+                        'report_id': report_id,
+                        'provider': report_meta.get('provider'),
+                        'notion_push': notion_result
+                    }
+
+                    if include_preview:
+                        report_entry['preview'] = content[:500] + '...' if len(content) > 500 else content
+
+                    persisted_reports.append(report_entry)
+
+                except Exception as storage_exc:
+                    logger.error(
+                        "综合报告存储或推送失败 - 模型 %s: %s",
+                        display_name,
+                        storage_exc,
+                        exc_info=True
+                    )
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': str(storage_exc)
+                    })
+
+            overall_success = len(persisted_reports) > 0
+
+            return {
+                'success': overall_success,
+                'reports': persisted_reports,
+                'failures': failures,
+                'article_counts': {
+                    'total': len(analyzed_articles),
+                    'indiehackers': indiehackers_count,
+                    'ezindie': ezindie_count
+                },
+                'model_count_requested': len(models_meta)
             }
-            
-            report_id = self.db_manager.save_synthesis_report(report_data)
-            logger.info(f"自定义筛选综合洞察报告生成成功，报告ID: {report_id}")
 
-            # 推送到 Notion
-            self._push_synthesis_report_to_notion(synthesis_content, report_id)
-
-            return report_id
-            
         except Exception as e:
             logger.error(f"生成综合洞察报告失败: {e}")
-            return None
+            return {
+                'success': False,
+                'reports': [],
+                'failures': [{'error': str(e)}]
+            }
 
-    def _push_synthesis_report_to_notion(self, report_content: str, report_id: int):
+    def _push_synthesis_report_to_notion(
+        self,
+        report_content: str,
+        report_id: int,
+        model_display: Optional[str] = None
+    ) -> Dict[str, Any]:
         """将社区综合洞察报告推送到 Notion"""
         try:
             # 从报告内容中提取标题
@@ -2334,6 +2677,9 @@ class CommunityDeepAnalyzer:
                 if line.startswith('# '):
                     report_title = line[2:].strip()
                     break
+
+            if model_display:
+                report_title = f"{report_title} · {model_display}"
 
             logger.info(f"开始推送社区洞察报告到 Notion: {report_title}")
 
@@ -2346,6 +2692,11 @@ class CommunityDeepAnalyzer:
                     logger.info(f"社区洞察报告成功推送到 Notion: {result.get('page_url')}")
             else:
                 logger.error(f"推送社区洞察报告到 Notion 失败: {result.get('error')}")
+            return result
 
         except Exception as e:
             logger.error(f"推送社区洞察报告到 Notion 时出错: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }

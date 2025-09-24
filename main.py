@@ -291,27 +291,73 @@ def print_result(result: dict, task_type: str):
             print(f"   深度分析: {result['analysis_count']} 个")
     
     elif task_type == 'tech_news_report':
-        print(f"✅ 科技新闻报告生成完成")
-        print(f"   报告文件: {result.get('report_path', '未知')}")
+        print("✅ 科技新闻报告生成完成")
+        reports = result.get('reports', [])
+        if reports:
+            print(f"   成功入库: {len(reports)} 份")
+            for report in reports:
+                model_display = report.get('model_display', report.get('model', '未知模型'))
+                uuid = report.get('report_uuid', '未知UUID')
+                notion_info = report.get('notion_push') or {}
+                if notion_info.get('success') and notion_info.get('page_url'):
+                    notion_status = f"Notion: {notion_info.get('page_url')}"
+                elif notion_info:
+                    notion_status = f"Notion失败: {notion_info.get('error', '未知原因')}"
+                else:
+                    notion_status = "Notion: 未推送"
+                print(f"   - {model_display} -> UUID {uuid} ({notion_status})")
+        else:
+            print(f"   {result.get('message', '未生成报告')}")
+
+        failures = (result.get('analysis_failures') or []) + (result.get('generation_failures') or [])
+        if failures:
+            print(f"   失败模型: {len(failures)}")
+            for failure in failures[:3]:
+                model_label = failure.get('model_display', failure.get('model', '未知模型'))
+                print(f"     - {model_label}: {failure.get('error', '未知错误')}")
 
     elif task_type == 'community_analysis':
         print(f"✅ 社区深度分析完成")
         print(f"   处理文章数: {result.get('processed_articles', 0)}")
         
     elif task_type == 'community_report':
-        print(f"✅ 社区综合洞察报告生成完成")
-        if result.get('report_id'):
-            print(f"   报告ID: {result.get('report_id')}")
+        print("✅ 社区综合洞察报告生成完成")
+        reports = result.get('reports', [])
+        if reports:
+            print(f"   成功入库: {len(reports)} 份")
+            for item in reports:
+                model_display = item.get('model_display', item.get('model', '未知模型'))
+                report_id = item.get('report_id', '未知ID')
+                notion_info = item.get('notion_push') or {}
+                if notion_info.get('success') and notion_info.get('page_url'):
+                    notion_status = f"Notion: {notion_info.get('page_url')}"
+                elif notion_info:
+                    notion_status = f"Notion失败: {notion_info.get('error', '未知原因')}"
+                else:
+                    notion_status = "Notion: 未推送"
+                print(f"   - {model_display} -> 报告ID {report_id} ({notion_status})")
         else:
-            print(f"   {result.get('message', '未知')}")
+            print(f"   {result.get('message', '未生成报告')}")
+
+        failures = result.get('failures', [])
+        if failures:
+            print(f"   失败模型: {len(failures)}")
+            for failure in failures[:3]:
+                model_label = failure.get('model_display', failure.get('model', '未知模型'))
+                print(f"     - {model_label}: {failure.get('error', '未知错误')}")
             
     elif task_type == 'community_full':
         print(f"✅ 社区完整分析与报告任务完成")
         analysis_result = result.get('analysis_result', {})
         report_result = result.get('report_result', {})
         print(f"   处理文章数: {analysis_result.get('processed_articles', 0)}")
-        if report_result.get('report_id'):
-            print(f"   生成报告ID: {report_result.get('report_id')}")
+        reports = report_result.get('reports', [])
+        if reports:
+            print(f"   生成报告: {len(reports)} 份")
+            for item in reports:
+                model_display = item.get('model_display', item.get('model', '未知模型'))
+                report_id = item.get('report_id', '未知ID')
+                print(f"     - {model_display}: 报告ID {report_id}")
         else:
             print(f"   报告生成: {report_result.get('message', '未知')}")
 

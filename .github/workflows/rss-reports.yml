@@ -41,6 +41,8 @@ jobs:
       # --- LLM模型配置 (可选, 可覆盖config.ini) ---
       LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
       LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_REPORT_MODELS: ${{ secrets.LLM_REPORT_MODELS }}
+      LLM_LOG_REPORT_PREVIEW: ${{ secrets.LLM_LOG_REPORT_PREVIEW }}
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
@@ -89,6 +91,8 @@ jobs:
       # --- LLM模型配置 (可选, 可覆盖config.ini) ---
       LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
       LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_REPORT_MODELS: ${{ secrets.LLM_REPORT_MODELS }}
+      LLM_LOG_REPORT_PREVIEW: ${{ secrets.LLM_LOG_REPORT_PREVIEW }}
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
@@ -137,6 +141,8 @@ jobs:
       # --- LLM模型配置 (可选, 可覆盖config.ini) ---
       LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
       LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_REPORT_MODELS: ${{ secrets.LLM_REPORT_MODELS }}
+      LLM_LOG_REPORT_PREVIEW: ${{ secrets.LLM_LOG_REPORT_PREVIEW }}
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}
@@ -185,6 +191,8 @@ jobs:
       # --- LLM模型配置 (可选, 可覆盖config.ini) ---
       LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
       LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_REPORT_MODELS: ${{ secrets.LLM_REPORT_MODELS }}
+      LLM_LOG_REPORT_PREVIEW: ${{ secrets.LLM_LOG_REPORT_PREVIEW }}
       LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       # --- 并行化配置 (可选) ---
       EXECUTOR_MAX_WORKERS: ${{ secrets.EXECUTOR_MAX_WORKERS }}

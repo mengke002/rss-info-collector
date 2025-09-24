@@ -117,7 +117,13 @@ class TechNewsReportGenerator:
 
         return "\n".join(markdown_parts)
 
-    def generate_report(self, full_report_md: str, article_count: int, time_range_str: str = "过去24小时") -> Dict[str, Any]:
+    def generate_report(
+        self,
+        full_report_md: str,
+        article_count: int,
+        time_range_str: str = "过去24小时",
+        model_info: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         简化的报告生成方法：接收已生成的Markdown报告并存入数据库
         
@@ -143,6 +149,15 @@ class TechNewsReportGenerator:
                 "generation_method": "two_layer_llm",
                 "generated_at": beijing_time.isoformat()
             }
+
+            if model_info:
+                metadata.update({
+                    "llm_model": model_info.get('model'),
+                    "llm_model_display": model_info.get('model_display'),
+                    "llm_provider": model_info.get('provider')
+                })
+
+            notion_result: Optional[Dict[str, Any]] = None
 
             # 将报告存入数据库
             try:
@@ -171,7 +186,11 @@ class TechNewsReportGenerator:
                         logger.info(f"报告已成功存入数据库 - UUID: {report_uuid}")
 
                         # 推送到 Notion
-                        self._push_to_notion(full_report_md, report_uuid)
+                        notion_result = self._push_to_notion(
+                            full_report_md,
+                            report_uuid,
+                            model_display=model_info.get('model_display') if model_info else None
+                        )
 
             except Exception as e:
                 logger.error(f"存储报告到数据库失败: {e}")
@@ -186,7 +205,9 @@ class TechNewsReportGenerator:
                 'report_uuid': report_uuid,
                 'report_date': report_date.isoformat(),
                 'article_count': article_count,
-                'message': f'科技新闻报告生成完成，基于{article_count}篇文章的分析'
+                'message': f'科技新闻报告生成完成，基于{article_count}篇文章的分析',
+                'model_info': model_info,
+                'notion_push': notion_result
             }
             
         except Exception as e:
@@ -197,7 +218,12 @@ class TechNewsReportGenerator:
                 'report_uuid': None
             }
 
-    def _push_to_notion(self, report_content: str, report_uuid: str):
+    def _push_to_notion(
+        self,
+        report_content: str,
+        report_uuid: str,
+        model_display: Optional[str] = None
+    ) -> Dict[str, Any]:
         """将报告推送到 Notion"""
         try:
             # 从报告内容中提取标题
@@ -207,6 +233,9 @@ class TechNewsReportGenerator:
                 if line.startswith('# '):
                     report_title = line[2:].strip()
                     break
+
+            if model_display:
+                report_title = f"{report_title} · {model_display}"
 
             logger.info(f"开始推送报告到 Notion: {report_title}")
 
@@ -220,8 +249,14 @@ class TechNewsReportGenerator:
             else:
                 logger.error(f"推送报告到 Notion 失败: {result.get('error')}")
 
+            return result
+
         except Exception as e:
             logger.error(f"推送报告到 Notion 时出错: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
     def _save_report_as_backup_file(self, report_uuid: str, content: str, report_type: str):
         """在数据库保存失败时，将报告保存为本地文件作为备份。"""

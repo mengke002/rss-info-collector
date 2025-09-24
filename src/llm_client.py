@@ -4,7 +4,7 @@ LLM客户端模块
 """
 import logging
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import httpx
 
 from .config import config
@@ -36,11 +36,25 @@ class LLMClient:
             timeout=240.0
         )
         
-        self.logger.info("LLM客户端初始化成功")
-        self.logger.info(f"Fast Model: {self.llm_config['fast_model_name']}")
-        self.logger.info(f"Smart Model: {self.llm_config['smart_model_name']}")
+        self.fast_model = self.llm_config.get('fast_model_name')
+        self.smart_model = self.llm_config.get('smart_model_name')
+        self.report_models = [m for m in self.llm_config.get('report_models', []) if isinstance(m, str) and m.strip()]
 
-    def call_llm(self, prompt: str, model_type: str = 'fast', temperature: float = 0.3) -> Dict[str, Any]:
+        self.logger.info("LLM客户端初始化成功")
+        self.logger.info(f"Fast Model: {self.fast_model}")
+        self.logger.info(f"Smart Model: {self.smart_model}")
+        if self.report_models:
+            self.logger.info(f"Report Models: {', '.join(self.report_models)}")
+        else:
+            self.logger.warning("未配置报告模型列表，将回退到智能模型")
+
+    def call_llm(
+        self,
+        prompt: str,
+        model_type: str = 'fast',
+        temperature: float = 0.3,
+        model_override: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         调用LLM进行分析
         
@@ -56,11 +70,22 @@ class LLMClient:
             raise ValueError("model_type 必须是 'fast' 或 'smart'")
             
         # 根据模型类型选择模型
-        if model_type == 'fast':
-            model_name = self.llm_config['fast_model_name']
+        if model_override:
+            model_name = model_override
+        elif model_type == 'fast':
+            model_name = self.fast_model
         else:
-            model_name = self.llm_config['smart_model_name']
-            
+            model_name = self.smart_model
+
+        if not model_name:
+            error_msg = f"未配置可用的模型 (model_type={model_type}, override={model_override})"
+            self.logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg,
+                'model': model_override or model_type
+            }
+
         return self._make_request(prompt, model_name, temperature)
 
     def call_fast_model(self, prompt: str, temperature: float = 0.1) -> Dict[str, Any]:
@@ -120,23 +145,44 @@ class LLMClient:
                     
                     # 处理流式响应
                     for line in response.iter_text():
-                        if line.strip():
-                            for sub_line in line.split('\n'):
-                                if sub_line.startswith('data: '):
-                                    line_data = sub_line[len('data: '):]
-                                    if line_data.strip() == '[DONE]':
-                                        break
-                                    try:
-                                        chunk = json.loads(line_data)
-                                        if 'choices' in chunk and chunk['choices']:
-                                            delta = chunk['choices'][0].get('delta', {})
-                                            content_part = delta.get('content')
-                                            if content_part:
-                                                full_response_content += content_part
-                                                chunk_count += 1
-                                    except json.JSONDecodeError:
-                                        # 忽略无法解析的chunk，继续处理
-                                        continue
+                        if not line.strip():
+                            continue
+
+                        for sub_line in line.split('\n'):
+                            if not sub_line.startswith('data: '):
+                                continue
+
+                            line_data = sub_line[len('data: '):]
+                            if line_data.strip() == '[DONE]':
+                                break
+
+                            try:
+                                chunk = json.loads(line_data)
+                            except json.JSONDecodeError:
+                                self.logger.debug("跳过无法解析的chunk: %s", line_data[:120])
+                                continue
+
+                            try:
+                                choices = chunk.get('choices') or []
+                                if not choices:
+                                    self.logger.debug("跳过缺少choices的chunk: %s", chunk)
+                                    continue
+
+                                delta = choices[0].get('delta', {}) if choices else {}
+
+                                # OpenAI兼容接口可能返回reasoning_content，需要跳过
+                                reasoning_content = delta.get('reasoning_content')
+                                if reasoning_content:
+                                    self.logger.debug("收到reasoning片段，长度%s，已忽略", len(reasoning_content))
+
+                                content_part = delta.get('content')
+                                if content_part:
+                                    full_response_content += content_part
+                                    chunk_count += 1
+                            except Exception as chunk_error:
+                                self.logger.warning("Chunk处理异常，已跳过: %s", chunk_error)
+                                self.logger.debug("异常chunk详情: %r", chunk, exc_info=True)
+                                continue
 
                 self.logger.info(f"LLM调用完成 - 处理了 {chunk_count} 个chunks")
                 self.logger.info(f"响应内容长度: {len(full_response_content)} 字符")
@@ -252,19 +298,61 @@ class LLMClient:
         if hasattr(self, 'http_client'):
             self.http_client.close()
 
+    def get_report_models(self) -> List[str]:
+        """返回用于最终报告生成的模型列表"""
+        if self.report_models:
+            return list(self.report_models)
+        return [model for model in [self.smart_model] if model]
+
+    @staticmethod
+    def get_model_display_name(model_name: Optional[str]) -> str:
+        """为模型名称生成友好的展示名称"""
+        if not model_name:
+            return 'LLM'
+
+        lower_name = model_name.lower()
+        if 'gemini' in lower_name:
+            return 'Gemini'
+        if 'glm' in lower_name and '4.5' in lower_name:
+            return 'GLM4.5'
+        if 'glm' in lower_name:
+            return 'GLM'
+        if 'gpt' in lower_name and '4' in lower_name:
+            return 'GPT-4'
+
+        return model_name
+
 
 # 创建全局LLM客户端实例
 def get_llm_client() -> Optional[LLMClient]:
-    """获取LLM客户端实例"""
+    """获取LLM客户端实例（带缓存）"""
+    global _cached_llm_client
+
     try:
-        return LLMClient()
+        if _cached_llm_client is None:
+            _cached_llm_client = LLMClient()
+        return _cached_llm_client
     except Exception as e:
         logger.warning(f"LLM客户端初始化失败: {e}")
+        _cached_llm_client = None
         return None
 
 
+def get_report_model_names() -> List[str]:
+    """便捷地获取可用于报告生成的模型列表"""
+    client = get_llm_client()
+    if not client:
+        return []
+    return client.get_report_models()
+
+
 # 便捷函数
-def call_llm(prompt: str, model_type: str = 'fast', temperature: float = 0.3) -> Dict[str, Any]:
+def call_llm(
+    prompt: str,
+    model_type: str = 'fast',
+    temperature: float = 0.3,
+    model_override: Optional[str] = None
+) -> Dict[str, Any]:
     """
     便捷的LLM调用函数
     
@@ -280,4 +368,8 @@ def call_llm(prompt: str, model_type: str = 'fast', temperature: float = 0.3) ->
     if not client:
         return {'success': False, 'error': 'LLM客户端初始化失败'}
     
-    return client.call_llm(prompt, model_type, temperature)
+    return client.call_llm(prompt, model_type, temperature, model_override=model_override)
+
+
+# 缓存的全局客户端实例
+_cached_llm_client: Optional[LLMClient] = None

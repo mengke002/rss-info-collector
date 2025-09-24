@@ -25,6 +25,13 @@ class Config:
                 self.config_parser.read(self.config_file, encoding='utf-8')
             except (configparser.Error, UnicodeDecodeError):
                 pass
+
+    @staticmethod
+    def _to_bool(value: Any) -> bool:
+        """将输入转换为布尔类型"""
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
     
     def _get_config_value(self, section: str, key: str, env_var: str, default_value: Any, value_type=str) -> Any:
         """
@@ -191,13 +198,49 @@ class Config:
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY 未设置。请在环境变量或config.ini中设置LLM功能需要API密钥。")
             
+        fast_model_name = self._get_config_value(
+            'llm', 'fast_model_name', 'LLM_FAST_MODEL_NAME', 'gpt-3.5-turbo-16k'
+        )
+        smart_model_name = self._get_config_value(
+            'llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', 'gpt-4-turbo'
+        )
+
+        # 解析用于最终报告生成的模型列表（逗号或换行分隔）
+        report_models_value = self._get_config_value(
+            'llm', 'report_models', 'LLM_REPORT_MODELS', '', str
+        )
+
+        report_models: List[str] = []
+        if isinstance(report_models_value, str) and report_models_value.strip():
+            tokens = report_models_value.replace('\n', ',').split(',')
+            for token in tokens:
+                candidate = token.strip()
+                if candidate and candidate not in report_models:
+                    report_models.append(candidate)
+
+        # 如果未显式配置多模型列表，则默认使用smart模型
+        if not report_models and smart_model_name:
+            report_models = [smart_model_name]
+
         return {
             # 快速模型配置
-            'fast_model_name': self._get_config_value('llm', 'fast_model_name', 'LLM_FAST_MODEL_NAME', 'gpt-3.5-turbo-16k'),
-            
+            'fast_model_name': fast_model_name,
+
             # 智能模型配置
-            'smart_model_name': self._get_config_value('llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', 'gpt-4-turbo'),
-            
+            'smart_model_name': smart_model_name,
+
+            # 提供用于最终报告生成的多模型列表
+            'report_models': report_models,
+
+            # 是否在日志/结果中保留报告预览内容
+            'log_report_preview': self._get_config_value(
+                'llm',
+                'log_report_preview',
+                'LLM_LOG_REPORT_PREVIEW',
+                False,
+                self._to_bool
+            ),
+
             # API配置
             'openai_api_key': openai_api_key,
             'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
@@ -230,6 +273,13 @@ class Config:
             'integration_token': self._get_config_value('notion', 'integration_token', 'NOTION_INTEGRATION_TOKEN', None),
             'parent_page_id': self._get_config_value('notion', 'parent_page_id', 'NOTION_PARENT_PAGE_ID', None)
         }
+
+    def should_log_report_preview(self) -> bool:
+        """是否在日志/结果中保留报告预览"""
+        try:
+            return bool(self.get_llm_config().get('log_report_preview', False))
+        except Exception:
+            return False
 
 # 全局配置实例
 config = Config()

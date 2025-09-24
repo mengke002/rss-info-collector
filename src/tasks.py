@@ -583,18 +583,35 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
         analyzer = TechNewsAnalyzer(db_manager)
         analysis_result = analyzer.run_tech_news_analysis(hours_back)
 
+        include_preview = config.should_log_report_preview()
+
         if not analysis_result.get('success'):
             logger.error("分析步骤失败，报告生成中止。")
-            return analysis_result
+            if include_preview:
+                return analysis_result
 
-        # 2. 从分析结果中获取已生成的完整报告
-        full_report_md = analysis_result.get('full_report')
-        if not full_report_md:
-            logger.error("分析结果中没有完整报告")
-            return {
+            sanitized_result = dict(analysis_result)
+            if 'model_reports' in sanitized_result:
+                sanitized_result['model_reports'] = TechNewsAnalyzer._sanitize_model_reports(
+                    sanitized_result.get('model_reports', [])
+                )
+            sanitized_result['full_report'] = None
+            return sanitized_result
+
+        model_reports = analysis_result.get('model_reports', [])
+        analysis_failures = analysis_result.get('failures', [])
+
+        if not model_reports:
+            logger.error("LLM分析未生成任何有效报告")
+            failure_payload = {
                 'success': False,
-                'error': '分析结果中没有完整报告'
+                'error': 'LLM分析未生成任何有效报告',
+                'analysis_failures': analysis_failures
             }
+            if not include_preview:
+                failure_payload['model_reports'] = TechNewsAnalyzer._sanitize_model_reports(model_reports)
+                failure_payload['full_report'] = None
+            return failure_payload
 
         # 3. 使用TechNewsReportGenerator保存报告到数据库
         from .report_generator import TechNewsReportGenerator
@@ -602,17 +619,68 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
         generator = TechNewsReportGenerator()
         article_count = analysis_result.get('successful_analysis_count', 0)
         time_range_str = f"过去{hours_back}小时"
-        
-        report_result = generator.generate_report(full_report_md, article_count, time_range_str)
-        
-        if report_result.get('success'):
-            logger.info(f"科技新闻报告生成成功: UUID {report_result.get('report_uuid')}")
-            # 将完整报告内容添加到返回结果中
-            report_result['full_report'] = full_report_md
-        else:
-            logger.error(f"报告生成失败: {report_result.get('error')}")
+        persisted_reports: List[Dict[str, Any]] = []
+        generation_failures: List[Dict[str, Any]] = []
 
-        return report_result
+        for report_meta in model_reports:
+            model_name = report_meta.get('model')
+            display_name = report_meta.get('model_display')
+
+            content = report_meta.get('content')
+            if not content:
+                generation_failures.append({
+                    'model': model_name,
+                    'model_display': display_name,
+                    'error': '报告内容为空'
+                })
+                continue
+
+            logger.info(f"开始保存 {display_name} 模型生成的科技新闻报告")
+            db_result = generator.generate_report(
+                full_report_md=content,
+                article_count=article_count,
+                time_range_str=time_range_str,
+                model_info=report_meta
+            )
+
+            db_result['model'] = model_name
+            db_result['model_display'] = display_name
+            db_result['provider'] = report_meta.get('provider')
+
+            if db_result.get('success'):
+                logger.info(
+                    "科技新闻报告持久化成功 - 模型 %s, UUID %s",
+                    display_name,
+                    db_result.get('report_uuid')
+                )
+                persisted_reports.append(db_result)
+            else:
+                error_msg = db_result.get('error', '报告保存失败')
+                logger.error(
+                    "科技新闻报告持久化失败 - 模型 %s: %s",
+                    display_name,
+                    error_msg
+                )
+                generation_failures.append({
+                    'model': model_name,
+                    'model_display': display_name,
+                    'error': error_msg
+                })
+
+        overall_success = len(persisted_reports) > 0
+        primary_report_uuid = persisted_reports[0]['report_uuid'] if overall_success else None
+
+        result_payload = {
+            'success': overall_success,
+            'reports': persisted_reports,
+            'analysis_failures': analysis_failures,
+            'generation_failures': generation_failures,
+            'full_report': analysis_result.get('full_report') if include_preview else None,
+            'primary_report_uuid': primary_report_uuid,
+            'model_reports': model_reports if include_preview else TechNewsAnalyzer._sanitize_model_reports(model_reports)
+        }
+
+        return result_payload
 
     except Exception as e:
         error_msg = f"报告生成任务中发生未知错误: {e}"
@@ -682,29 +750,35 @@ def run_community_synthesis_report_task(days: int = 7, use_custom_filter: bool =
         
         # 根据筛选条件生成报告
         if use_custom_filter:
-            # 自定义筛选：48小时内的indiehackers数据 + 最新1篇ezindie
-            report_id = analyzer.generate_synthesis_report(
-                days=days,  # 保留默认值作为备用
+            report_result = analyzer.generate_synthesis_report(
+                days=days,
                 indiehackers_hours=48,
                 ezindie_limit=1
             )
         else:
-            # 默认筛选：过去N天的数据
-            report_id = analyzer.generate_synthesis_report(days=days)
-        
-        if report_id:
+            report_result = analyzer.generate_synthesis_report(days=days)
+
+        reports = report_result.get('reports', [])
+        failures = report_result.get('failures', [])
+        report_ids = [item.get('report_id') for item in reports if item.get('report_id')]
+
+        if report_result.get('success'):
             filter_desc = "自定义筛选" if use_custom_filter else f"过去{days}天"
             result = {
                 'success': True,
-                'report_id': report_id,
-                'message': f'成功生成综合洞察报告({filter_desc})，ID: {report_id}'
+                'report_ids': report_ids,
+                'reports': reports,
+                'failures': failures,
+                'message': f"成功生成 {len(reports)} 份综合洞察报告({filter_desc})"
             }
         else:
             result = {
                 'success': False,
-                'message': '没有足够的已分析文章来生成报告'
+                'reports': reports,
+                'failures': failures,
+                'message': report_result.get('message', '生成综合洞察报告失败')
             }
-        
+
         logger.info(f"社区综合洞察报告生成任务完成: {result['message']}" )
         return result
         
