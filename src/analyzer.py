@@ -1078,13 +1078,13 @@ class TechNewsAnalyzer:
                     "生成完整报告失败: %s",
                     report_generation.get('error', '未知原因')
                 )
-            return {
-                'success': False,
-                'message': report_generation.get('error', '生成完整报告失败'),
-                'full_report': None,
-                'model_reports': self._sanitize_model_reports(report_generation.get('model_reports', [])),
-                'failures': report_generation.get('failures', [])
-            }
+                return {
+                    'success': False,
+                    'message': report_generation.get('error', '生成完整报告失败'),
+                    'full_report': None,
+                    'model_reports': self._sanitize_model_reports(report_generation.get('model_reports', [])),
+                    'failures': report_generation.get('failures', [])
+                }
 
             model_reports = report_generation.get('model_reports', [])
             if not model_reports:
