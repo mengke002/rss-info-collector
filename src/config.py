@@ -232,14 +232,7 @@ class Config:
             # 提供用于最终报告生成的多模型列表
             'report_models': report_models,
 
-            # 是否在日志/结果中保留报告预览内容
-            'log_report_preview': self._get_config_value(
-                'llm',
-                'log_report_preview',
-                'LLM_LOG_REPORT_PREVIEW',
-                False,
-                self._to_bool
-            ),
+
 
             # API配置
             'openai_api_key': openai_api_key,
@@ -274,12 +267,7 @@ class Config:
             'parent_page_id': self._get_config_value('notion', 'parent_page_id', 'NOTION_PARENT_PAGE_ID', None)
         }
 
-    def should_log_report_preview(self) -> bool:
-        """是否在日志/结果中保留报告预览"""
-        try:
-            return bool(self.get_llm_config().get('log_report_preview', False))
-        except Exception:
-            return False
+
 
 # 全局配置实例
 config = Config()

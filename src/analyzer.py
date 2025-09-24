@@ -631,10 +631,7 @@ class TechNewsAnalyzer:
 
     @staticmethod
     def _sanitize_model_reports(model_reports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """根据配置决定是否返回包含正文的模型报告"""
-        if config.should_log_report_preview():
-            return model_reports
-
+        """移除报告内容，只保留元数据"""
         sanitized: List[Dict[str, Any]] = []
         for report in model_reports or []:
             if isinstance(report, dict):
@@ -1062,6 +1059,9 @@ class TechNewsAnalyzer:
             # 2. 第一层：并行调用 analyze_single_article，得到结构化数据列表
             analysis_results = self.batch_analyze_articles(articles)
             
+            # 记录文章数量供立即保存使用
+            self._current_article_count = len(analysis_results) if analysis_results else 0
+            
             if not analysis_results:
                 logger.warning("文章分析未产生有效结果")
                 return {
@@ -1112,7 +1112,7 @@ class TechNewsAnalyzer:
                 'analysis_period': f'过去{hours_back}小时',
                 'total_articles_found': len(articles),
                 'successful_analysis_count': len(analysis_results),
-                'full_report': primary_report.get('content') if config.should_log_report_preview() else None,
+                'full_report': None,  # 不再在日志中显示完整报告内容
                 'model_reports': sanitized_model_reports,
                 'model_reports_full': model_reports,
                 'failures': report_generation.get('failures', []),
@@ -1154,6 +1154,47 @@ class TechNewsAnalyzer:
                 resolved_models.append({'model': model_name, 'display': display_name})
 
         return resolved_models
+
+    def _immediate_save_and_push_report(self, model_result: Dict[str, Any], hours_back: int):
+        """立即保存和推送单个模型生成的报告"""
+        try:
+            from .report_generator import TechNewsReportGenerator
+            
+            generator = TechNewsReportGenerator(self.db_manager)
+            
+            # 计算文章数量（这里简化处理，实际可以从分析结果中获取）
+            article_count = getattr(self, '_current_article_count', 0)
+            time_range_str = f"过去{hours_back}小时"
+            
+            logger.info(f"立即保存 {model_result.get('model_display')} 模型生成的科技新闻报告")
+            
+            db_result = generator.generate_report(
+                full_report_md=model_result.get('content', ''),
+                article_count=article_count,
+                time_range_str=time_range_str,
+                model_info=model_result
+            )
+            
+            if db_result.get('success'):
+                logger.info(
+                    "科技新闻报告立即保存成功 - 模型 %s, UUID %s",
+                    model_result.get('model_display'),
+                    db_result.get('report_uuid')
+                )
+                # 将保存结果添加到模型结果中，供后续使用
+                model_result['db_save_result'] = db_result
+            else:
+                error_msg = db_result.get('error', '报告保存失败')
+                logger.error(
+                    "科技新闻报告立即保存失败 - 模型 %s: %s",
+                    model_result.get('model_display'),
+                    error_msg
+                )
+                model_result['db_save_error'] = error_msg
+                
+        except Exception as e:
+            logger.error(f"立即保存报告时出现异常: {e}")
+            model_result['db_save_error'] = str(e)
 
     def generate_full_report(self, analysis_results: List[Dict[str, Any]], hours_back: int = 24) -> Dict[str, Any]:
         """并行调用多个模型生成完整报告"""
@@ -1320,6 +1361,10 @@ class TechNewsAnalyzer:
                                 meta['display'],
                                 len(model_result.get('content', ''))
                             )
+                            
+                            # 立即保存和推送报告，而不是等待所有模型完成
+                            self._immediate_save_and_push_report(model_result, hours_back)
+                            
                         else:
                             error_msg = model_result.get('error', '报告生成失败')
                             logger.warning(
@@ -2504,7 +2549,7 @@ class CommunityDeepAnalyzer:
                 [meta['display'] for meta in models_meta]
             )
 
-            include_preview = config.should_log_report_preview()
+            # 不再需要预览配置
             successes: Dict[int, Dict[str, Any]] = {}
             failures: List[Dict[str, Any]] = []
 
@@ -2568,6 +2613,10 @@ class CommunityDeepAnalyzer:
                                 meta['display'],
                                 len(result.get('content', ''))
                             )
+                            
+                            # 立即保存和推送社区报告
+                            self._immediate_save_and_push_synthesis_report(result, analyzed_articles, start_date, end_date)
+                            
                         else:
                             error_msg = result.get('error', '报告生成失败')
                             logger.warning(
@@ -2598,55 +2647,42 @@ class CommunityDeepAnalyzer:
             for report_meta in ordered_successes:
                 model_name = report_meta['model']
                 display_name = report_meta['model_display']
-                content = report_meta['content']
 
-                report_type_suffix = model_name.replace('/', '_') if model_name else 'default'
-                report_data = {
-                    'report_type': f'community_insights_custom::{report_type_suffix}',
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'content': content,
-                    'source_article_ids': [article['id'] for article in analyzed_articles]
-                }
-
-                try:
-                    report_id = self.db_manager.save_synthesis_report(report_data)
-                    logger.info(
-                        "综合洞察报告存储成功 - 模型 %s, 报告ID %s",
-                        display_name,
-                        report_id
-                    )
-
-                    notion_result = self._push_synthesis_report_to_notion(
-                        report_content=content,
-                        report_id=report_id,
-                        model_display=display_name
-                    )
-
+                # 检查是否已经立即保存成功
+                if 'db_save_result' in report_meta:
+                    save_result = report_meta['db_save_result']
                     report_entry = {
                         'model': model_name,
                         'model_display': display_name,
-                        'report_id': report_id,
+                        'report_id': save_result['report_id'],
                         'provider': report_meta.get('provider'),
-                        'notion_push': notion_result
+                        'notion_push': save_result['notion_push']
                     }
-
-                    if include_preview:
-                        report_entry['preview'] = content[:500] + '...' if len(content) > 500 else content
-
                     persisted_reports.append(report_entry)
-
-                except Exception as storage_exc:
-                    logger.error(
-                        "综合报告存储或推送失败 - 模型 %s: %s",
+                    logger.info(
+                        "社区综合报告已立即保存 - 模型 %s, 报告ID %s",
                         display_name,
-                        storage_exc,
-                        exc_info=True
+                        save_result['report_id']
+                    )
+                elif 'db_save_error' in report_meta:
+                    error_msg = report_meta['db_save_error']
+                    logger.error(
+                        "社区综合报告立即保存失败 - 模型 %s: %s",
+                        display_name,
+                        error_msg
                     )
                     failures.append({
                         'model': model_name,
                         'model_display': display_name,
-                        'error': str(storage_exc)
+                        'error': error_msg
+                    })
+                else:
+                    # 如果没有立即保存信息，说明可能是旧版本或出现了问题
+                    logger.warning(f"模型 {display_name} 的社区报告没有立即保存信息")
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': '报告未被立即保存'
                     })
 
             overall_success = len(persisted_reports) > 0
@@ -2670,6 +2706,50 @@ class CommunityDeepAnalyzer:
                 'reports': [],
                 'failures': [{'error': str(e)}]
             }
+
+    def _immediate_save_and_push_synthesis_report(self, report_meta: Dict[str, Any], 
+                                                analyzed_articles: List[Dict[str, Any]], 
+                                                start_date, end_date):
+        """立即保存和推送单个模型生成的社区综合报告"""
+        try:
+            model_name = report_meta['model']
+            display_name = report_meta['model_display']
+            content = report_meta['content']
+
+            report_type_suffix = model_name.replace('/', '_') if model_name else 'default'
+            report_data = {
+                'report_type': f'community_insights_custom::{report_type_suffix}',
+                'start_date': start_date,
+                'end_date': end_date,
+                'content': content,
+                'source_article_ids': [article['id'] for article in analyzed_articles]
+            }
+
+            logger.info(f"立即保存 {display_name} 模型生成的社区综合报告")
+            
+            report_id = self.db_manager.save_synthesis_report(report_data)
+            logger.info(
+                "社区综合报告立即保存成功 - 模型 %s, 报告ID %s",
+                display_name,
+                report_id
+            )
+
+            notion_result = self._push_synthesis_report_to_notion(
+                report_content=content,
+                report_id=report_id,
+                model_display=display_name
+            )
+
+            # 将保存结果添加到报告元数据中
+            report_meta['db_save_result'] = {
+                'success': True,
+                'report_id': report_id,
+                'notion_push': notion_result
+            }
+
+        except Exception as e:
+            logger.error(f"立即保存社区综合报告时出现异常: {e}")
+            report_meta['db_save_error'] = str(e)
 
     def _push_synthesis_report_to_notion(
         self,

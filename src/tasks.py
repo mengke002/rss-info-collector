@@ -505,8 +505,8 @@ def run_tech_news_analysis_task(db_manager: DatabaseManager, hours_back: int = 2
         # 运行分析
         result = analyzer.run_tech_news_analysis(hours_back)
 
-        if not config.should_log_report_preview():
-            result.pop('model_reports_full', None)
+        # 移除完整报告内容以减少日志大小
+        result.pop('model_reports_full', None)
 
         if result.get('success', False):
             logger.info(f"科技新闻分析完成 - 找到 {result.get('total_articles_found', 0)} 篇文章，成功分析 {result.get('successful_analysis_count', 0)} 篇")
@@ -586,13 +586,8 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
         analyzer = TechNewsAnalyzer(db_manager)
         analysis_result = analyzer.run_tech_news_analysis(hours_back)
 
-        include_preview = config.should_log_report_preview()
-
         if not analysis_result.get('success'):
             logger.error("分析步骤失败，报告生成中止。")
-            if include_preview:
-                return analysis_result
-
             sanitized_result = dict(analysis_result)
             if 'model_reports' in sanitized_result:
                 sanitized_result['model_reports'] = TechNewsAnalyzer._sanitize_model_reports(
@@ -610,20 +605,14 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
             failure_payload = {
                 'success': False,
                 'error': 'LLM分析未生成任何有效报告',
-                'analysis_failures': analysis_failures
+                'analysis_failures': analysis_failures,
+                'model_reports': TechNewsAnalyzer._sanitize_model_reports(model_reports),
+                'full_report': None
             }
-            if not include_preview:
-                failure_payload['model_reports'] = TechNewsAnalyzer._sanitize_model_reports(model_reports)
-                failure_payload.pop('model_reports_full', None)
-                failure_payload['full_report'] = None
+            failure_payload.pop('model_reports_full', None)
             return failure_payload
 
-        # 3. 使用TechNewsReportGenerator保存报告到数据库
-        from .report_generator import TechNewsReportGenerator
-        
-        generator = TechNewsReportGenerator()
-        article_count = analysis_result.get('successful_analysis_count', 0)
-        time_range_str = f"过去{hours_back}小时"
+        # 3. 收集已经立即保存的报告结果
         persisted_reports: List[Dict[str, Any]] = []
         generation_failures: List[Dict[str, Any]] = []
 
@@ -631,38 +620,22 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
             model_name = report_meta.get('model')
             display_name = report_meta.get('model_display')
 
-            content = report_meta.get('content')
-            if not content:
-                generation_failures.append({
-                    'model': model_name,
-                    'model_display': display_name,
-                    'error': '报告内容为空'
-                })
-                continue
-
-            logger.info(f"开始保存 {display_name} 模型生成的科技新闻报告")
-            db_result = generator.generate_report(
-                full_report_md=content,
-                article_count=article_count,
-                time_range_str=time_range_str,
-                model_info=report_meta
-            )
-
-            db_result['model'] = model_name
-            db_result['model_display'] = display_name
-            db_result['provider'] = report_meta.get('provider')
-
-            if db_result.get('success'):
+            # 检查是否已经立即保存成功
+            if 'db_save_result' in report_meta:
+                db_result = report_meta['db_save_result']
+                db_result['model'] = model_name
+                db_result['model_display'] = display_name
+                db_result['provider'] = report_meta.get('provider')
+                persisted_reports.append(db_result)
                 logger.info(
-                    "科技新闻报告持久化成功 - 模型 %s, UUID %s",
+                    "科技新闻报告已立即保存 - 模型 %s, UUID %s",
                     display_name,
                     db_result.get('report_uuid')
                 )
-                persisted_reports.append(db_result)
-            else:
-                error_msg = db_result.get('error', '报告保存失败')
+            elif 'db_save_error' in report_meta:
+                error_msg = report_meta['db_save_error']
                 logger.error(
-                    "科技新闻报告持久化失败 - 模型 %s: %s",
+                    "科技新闻报告立即保存失败 - 模型 %s: %s",
                     display_name,
                     error_msg
                 )
@@ -670,6 +643,14 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
                     'model': model_name,
                     'model_display': display_name,
                     'error': error_msg
+                })
+            else:
+                # 如果没有立即保存信息，说明可能是旧版本或出现了问题
+                logger.warning(f"模型 {display_name} 的报告没有立即保存信息")
+                generation_failures.append({
+                    'model': model_name,
+                    'model_display': display_name,
+                    'error': '报告未被立即保存'
                 })
 
         overall_success = len(persisted_reports) > 0
@@ -682,13 +663,10 @@ def run_tech_news_report_generation_task(db_manager: DatabaseManager, hours_back
             'reports': persisted_reports,
             'analysis_failures': analysis_failures,
             'generation_failures': generation_failures,
-            'full_report': analysis_result.get('full_report') if include_preview else None,
+            'full_report': None,  # 不在日志中显示完整报告
             'primary_report_uuid': primary_report_uuid,
-            'model_reports': model_reports if include_preview else sanitized_model_reports
+            'model_reports': sanitized_model_reports
         }
-
-        if include_preview:
-            result_payload['model_reports_full'] = model_reports
 
         return result_payload
 
