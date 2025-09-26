@@ -554,6 +554,35 @@ class NotionClient:
                         "type": "divider",
                         "divider": {}
                     })
+                # 引用块处理
+                elif line.startswith('> '):
+                    # 处理引用块，支持多行引用
+                    quote_lines = [line[2:]]  # 移除 '> ' 前缀
+                    j = i + 1
+                    # 收集连续的引用行
+                    while j < len(lines):
+                        next_line = lines[j]
+                        if next_line.startswith('> '):
+                            quote_lines.append(next_line[2:])
+                            j += 1
+                        elif next_line.strip() == '':
+                            # 空行，继续收集
+                            j += 1
+                        else:
+                            break
+
+                    # 合并引用内容
+                    quote_text = ' '.join(line.strip() for line in quote_lines if line.strip())
+                    if quote_text:
+                        blocks.append({
+                            "object": "block",
+                            "type": "quote",
+                            "quote": {
+                                "rich_text": self._parse_rich_text(quote_text)
+                            }
+                        })
+
+                    i = j - 1  # 调整索引，因为外层循环会自增
                 # 列表项 - 支持多层嵌套
                 elif line.startswith(('- ', '* ')) or (line.startswith(' ') and line.lstrip().startswith(('- ', '* '))):
                     # 处理列表项，支持嵌套结构
