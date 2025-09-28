@@ -15,7 +15,7 @@ import uuid
 from .config import config
 from .database import DatabaseManager
 from .llm_client import call_llm
-from .notion_client import notion_client
+from .notion_client import get_notion_client
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +239,7 @@ class TechNewsReportGenerator:
 
             logger.info(f"开始推送报告到 Notion: {report_title}")
 
-            result = notion_client.create_report_page(report_title, report_content)
+            result = get_notion_client().create_report_page(report_title, report_content)
 
             if result.get('success'):
                 if result.get('skipped'):
@@ -430,7 +430,7 @@ class ProductDiscoveryReportGenerator:
 
             logger.info(f"开始推送产品发现报告到 Notion: {report_title}")
 
-            result = notion_client.create_report_page(report_title, report_content)
+            result = get_notion_client().create_report_page(report_title, report_content)
 
             if result.get('success'):
                 if result.get('skipped'):

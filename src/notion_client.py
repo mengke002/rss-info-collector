@@ -1276,5 +1276,13 @@ class NotionClient:
             return {"success": False, "error": str(e)}
 
 
-# 全局Notion客户端实例
-notion_client = NotionClient()
+_notion_client_instance = None
+
+def get_notion_client():
+    """
+    获取Notion客户端的单例实例。
+    """
+    global _notion_client_instance
+    if _notion_client_instance is None:
+        _notion_client_instance = NotionClient()
+    return _notion_client_instance

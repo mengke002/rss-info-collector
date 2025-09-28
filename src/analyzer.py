@@ -13,7 +13,7 @@ import pymysql
 from .config import config
 from .database import DatabaseManager
 from .llm_client import call_llm, get_report_model_names, LLMClient
-from .notion_client import notion_client
+from .notion_client import get_notion_client
 
 logger = logging.getLogger(__name__)
 
@@ -2772,7 +2772,7 @@ class CommunityDeepAnalyzer:
 
             logger.info(f"开始推送社区洞察报告到 Notion: {report_title}")
 
-            result = notion_client.create_report_page(report_title, report_content)
+            result = get_notion_client().create_report_page(report_title, report_content)
 
             if result.get('success'):
                 if result.get('skipped'):
