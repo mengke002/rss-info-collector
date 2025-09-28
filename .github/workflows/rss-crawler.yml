@@ -31,6 +31,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_NAME: ${{ secrets.DB_NAME }}
       DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      DB_SKIP_TABLE_CHECK: ${{ secrets.DB_SKIP_TABLE_CHECK }}
       # --- RSSHub Hosts ---
       RSSHUB_HOSTS: ${{ secrets.RSSHUB_HOSTS }}
       # --- 并行化配置 (可选) ---
@@ -67,6 +68,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_NAME: ${{ secrets.DB_NAME }}
       DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      DB_SKIP_TABLE_CHECK: ${{ secrets.DB_SKIP_TABLE_CHECK }}
       # --- LLM密钥 ---
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
@@ -104,6 +106,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_NAME: ${{ secrets.DB_NAME }}
       DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      DB_SKIP_TABLE_CHECK: ${{ secrets.DB_SKIP_TABLE_CHECK }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -132,6 +135,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_NAME: ${{ secrets.DB_NAME }}
       DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      DB_SKIP_TABLE_CHECK: ${{ secrets.DB_SKIP_TABLE_CHECK }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

@@ -77,7 +77,8 @@ class Config:
             'password': self._get_config_value('database', 'password', 'DB_PASSWORD', None),
             'database': self._get_config_value('database', 'database', 'DB_NAME', None),
             'port': self._get_config_value('database', 'port', 'DB_PORT', 3306, int),
-            'charset': 'utf8mb4'
+            'charset': 'utf8mb4',
+            'skip_table_check': self._get_config_value('database', 'skip_table_check', 'DB_SKIP_TABLE_CHECK', True, self._to_bool)
         }
         
         # 检查SSL模式

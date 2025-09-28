@@ -20,7 +20,12 @@ class DatabaseManager:
         print("Initializing DatabaseManager...")
         self.db_config = config.get_database_config()
         self.config = config
-        self.init_database()
+        
+        # 根据配置决定是否跳过数据库表检查
+        if self.db_config.get('skip_table_check', False):
+            logger.info("已根据配置跳过数据库表结构检查。")
+        else:
+            self.init_database()
     
     @contextmanager
     def get_connection(self):
