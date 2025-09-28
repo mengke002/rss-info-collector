@@ -22,7 +22,8 @@ class DatabaseManager:
         self.config = config
         
         # 根据配置决定是否跳过数据库表检查
-        if self.db_config.get('skip_table_check', False):
+        skip_check = self.db_config.pop('skip_table_check', False)
+        if skip_check:
             logger.info("已根据配置跳过数据库表结构检查。")
         else:
             self.init_database()
