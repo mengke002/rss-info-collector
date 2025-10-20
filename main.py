@@ -13,9 +13,9 @@ from src.logger import setup_logging
 from src.database import DatabaseManager
 from src.config import config
 from src.tasks import (
-    run_crawl_task, run_cleanup_task, run_stats_task, 
+    run_crawl_task, run_cleanup_task, run_stats_task,
     run_product_discovery_analysis, run_report_generation_task,
-    run_tech_news_report_generation_task
+    run_tech_news_report_generation_task, run_product_catalog_export_task
 )
 from src.report_generator import ProductDiscoveryReportGenerator, TechNewsReportGenerator
 from src.analyzer import TechNewsAnalyzer
@@ -95,7 +95,7 @@ def run_tech_news_report_task():
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='RSS数据采集系统')
-    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'analyze', 'report', 'tech_news_report', 'full', 'report_product', 'report_tech_news', 'product_report_daily', 'product_report_weekly', 'community_analysis', 'community_report', 'community_full'],
+    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'analyze', 'report', 'tech_news_report', 'full', 'report_product', 'report_tech_news', 'product_report_daily', 'product_report_weekly', 'community_analysis', 'community_report', 'community_full', 'product_catalog'],
                        default='crawl', help='要执行的任务类型')
     parser.add_argument('--retention-days', type=int, 
                        help='数据保留天数（仅用于cleanup任务）')
@@ -163,10 +163,12 @@ def main():
     elif args.task == 'community_full':
         from src.tasks import run_community_analysis_and_report_task
         result = run_community_analysis_and_report_task(
-            analysis_batch_size=args.batch_size, 
-            report_days=7, 
+            analysis_batch_size=args.batch_size,
+            report_days=7,
             use_custom_filter=args.custom_filter
         )
+    elif args.task == 'product_catalog':
+        result = run_product_catalog_export_task()
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)
@@ -360,6 +362,23 @@ def print_result(result: dict, task_type: str):
                 print(f"     - {model_display}: 报告ID {report_id}")
         else:
             print(f"   报告生成: {report_result.get('message', '未知')}")
+
+    elif task_type == 'product_catalog':
+        print(f"✅ 产品清单导出完成")
+        print(f"   产品总数: {result.get('product_count', 0)}")
+        print(f"   报告长度: {result.get('markdown_length', 0)} 字符")
+
+        notion_push = result.get('notion_push', {})
+        if notion_push.get('success'):
+            notion_url = result.get('notion_url', '')
+            if notion_push.get('skipped'):
+                print(f"   Notion: 已存在，跳过推送")
+            else:
+                print(f"   Notion: 推送成功")
+            if notion_url:
+                print(f"   Notion URL: {notion_url}")
+        else:
+            print(f"   Notion: 推送失败 - {notion_push.get('error', '未知错误')}")
 
     elif task_type == 'full':
         print(f"✅ 完整维护任务完成")

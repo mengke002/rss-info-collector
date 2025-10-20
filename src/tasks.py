@@ -822,3 +822,61 @@ def run_community_analysis_and_report_task(analysis_batch_size: int = 10, report
             'success': False,
             'error': error_msg
         }
+
+
+def run_product_catalog_export_task() -> Dict[str, Any]:
+    """
+    导出所有产品清单任务
+
+    功能：
+    1. 从数据库获取所有产品（discovered_products + rss_decohack_products）
+    2. 基于产品名称去重，只保留时间最近的记录
+    3. 按时间由近及远排序
+    4. 生成完整的产品清单 Markdown 报告
+    5. 推送到 Notion
+
+    Returns:
+        执行结果字典
+    """
+    try:
+        logger.info("=" * 60)
+        logger.info("开始执行产品清单导出任务...")
+        logger.info("=" * 60)
+
+        from .product_catalog_generator import ProductCatalogGenerator
+
+        # 创建产品清单生成器
+        catalog_generator = ProductCatalogGenerator()
+
+        # 生成并推送产品清单
+        result = catalog_generator.generate_and_push_catalog()
+
+        if result.get('success'):
+            logger.info("✅ 产品清单导出任务完成！")
+            logger.info(f"   - 产品总数: {result.get('product_count', 0)}")
+            logger.info(f"   - 报告长度: {result.get('markdown_length', 0)} 字符")
+
+            notion_push = result.get('notion_push', {})
+            if notion_push.get('success'):
+                notion_url = result.get('notion_url', '')
+                if notion_push.get('skipped'):
+                    logger.info(f"   - Notion: 已存在，跳过推送")
+                else:
+                    logger.info(f"   - Notion: 推送成功")
+                if notion_url:
+                    logger.info(f"   - Notion URL: {notion_url}")
+            else:
+                logger.warning(f"   - Notion: 推送失败 - {notion_push.get('error', '未知错误')}")
+        else:
+            logger.error(f"❌ 产品清单导出任务失败: {result.get('error', result.get('message', '未知错误'))}")
+
+        logger.info("=" * 60)
+        return result
+
+    except Exception as e:
+        error_msg = f"产品清单导出任务失败: {e}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            'success': False,
+            'error': error_msg
+        }
