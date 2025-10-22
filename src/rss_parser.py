@@ -302,23 +302,26 @@ class RSSParser:
             data['title'] = self._get_element_text(item, 'title', namespaces) or "无标题"
             data['link'] = self._get_element_text(item, 'link', namespaces) or ""
             data['guid'] = self._get_element_text(item, 'guid', namespaces, data['link']) or data['link'] or f"rss-{hash(str(item))}"
-            
-            # 检测是否为ycombinator RSS
+
+            # 检测是否为特殊RSS类型
             is_ycombinator = 'ycombinator' in url or 'hackernews' in url
-            
+            is_weibo = 'weibo' in url
+
             # 获取描述内容
             description_html = self._get_element_text(item, 'description', namespaces)
             if not description_html:
                 description_html = self._get_element_text(item, 'content:encoded', namespaces)
             if not description_html:
                 description_html = self._get_element_text(item, 'summary', namespaces)
-            
+
             # 对于ycombinator，不设置summary字段，直接从link获取内容
             if is_ycombinator and description_html and "Comments on Hacker News" in description_html:
                 # ycombinator不需要summary字段，将在后续通过link爬取完整内容
                 pass
             else:
-                data['summary'] = self._clean_html(description_html or "")
+                # 微博保留链接信息，其他RSS移除链接
+                keep_links = is_weibo
+                data['summary'] = self._clean_html(description_html or "", keep_links=keep_links)
             
             data['image_url'] = self._extract_image_from_html(description_html or "")
 
@@ -439,20 +442,34 @@ class RSSParser:
             return match.group(1)
         return None
 
-    def _clean_html(self, html_text: str) -> str:
+    def _clean_html(self, html_text: str, keep_links: bool = False) -> str:
+        """
+        清洗HTML内容，转换为纯文本
+
+        Args:
+            html_text: HTML内容
+            keep_links: 是否保留链接（默认False）
+
+        Returns:
+            清洗后的纯文本
+        """
         if not html_text:
             return ""
         try:
             import html2text
             h = html2text.HTML2Text()
-            h.ignore_links = True
-            h.ignore_images = True
+            h.ignore_links = not keep_links  # 根据参数决定是否保留链接
+            h.ignore_images = True  # 图片始终移除（只保留URL信息）
+            h.body_width = 0  # 不限制行宽，避免截断
             clean_text = h.handle(html_text)
         except ImportError:
+            # 回退方案：简单移除HTML标签
             clean_text = re.sub(r'<[^>]*>', '', html_text)
             clean_text = html.unescape(clean_text)
-        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-        return clean_text
+        # 压缩多余空白，但保留换行
+        clean_text = re.sub(r' +', ' ', clean_text)  # 压缩连续空格
+        clean_text = re.sub(r'\n\n+', '\n\n', clean_text)  # 压缩多个空行为两个
+        return clean_text.strip()
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """解析日期字符串"""

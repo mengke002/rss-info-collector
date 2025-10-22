@@ -274,8 +274,11 @@ class Config:
         user_ids_str = self._get_config_value('weibo', 'user_ids', 'WEIBO_USER_IDS', '1402400261')
         user_ids = [uid.strip() for uid in user_ids_str.split(',') if uid.strip()]
 
-        # 获取RSSHub前缀列表（默认为空，必须在配置中提供）
+        # 获取RSSHub前缀列表（支持两个环境变量名：WEIBO_RSSHUB_PREFIXES 或 RSSHUB_PREFIXES）
         prefixes_str = self._get_config_value('weibo', 'rsshub_prefixes', 'WEIBO_RSSHUB_PREFIXES', '')
+        if not prefixes_str:
+            # 如果 WEIBO_RSSHUB_PREFIXES 为空，尝试读取 RSSHUB_PREFIXES
+            prefixes_str = os.getenv('RSSHUB_PREFIXES', '')
         prefixes = [p.strip() for p in prefixes_str.split(',') if p.strip()]
 
         # 获取最大重试次数
