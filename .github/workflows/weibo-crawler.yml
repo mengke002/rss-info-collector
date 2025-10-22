@@ -2,9 +2,9 @@ name: Weibo RSS Crawler
 
 on:
   schedule:
-    # 北京时间 8:00-23:00 每半小时执行一次
+    # 北京时间 8:00-23:00 每1小时执行一次
     # UTC 时间 0:00-15:00 (北京时间 = UTC + 8)
-    - cron: '0,30 0-15 * * *'  # 每半小时，从UTC 0:00到15:30
+    - cron: '0 0-15 * * *'  # 每小时整点，从UTC 0:00到15:00
   workflow_dispatch:  # 支持手动触发
 
 jobs:
