@@ -26,7 +26,8 @@ class ProductCatalogGenerator:
             self.db_manager = DatabaseManager(config)
         logger.info("产品清单生成器初始化完成")
 
-    def get_all_products_deduplicated(self) -> List[Dict[str, Any]]:
+    def get_all_products_deduplicated(self, start_date: Optional[datetime] = None,
+                                       end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """
         获取所有产品并去重
 
@@ -35,15 +36,38 @@ class ProductCatalogGenerator:
         2. 如果重复，只保留时间最近的记录
         3. 结果按时间由近及远排序
 
+        Args:
+            start_date: 开始日期（可选），筛选该日期之后的产品
+            end_date: 结束日期（可选），筛选该日期之前的产品
+
         Returns:
             去重后的产品列表
         """
         try:
             with self.db_manager.get_connection() as conn:
                 with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                    # 构建时间筛选条件
+                    time_filter = ""
+                    params_discovered = []
+                    params_decohack = []
+
+                    if start_date or end_date:
+                        time_conditions = []
+                        if start_date:
+                            time_conditions.append("created_at >= %s")
+                            params_discovered.append(start_date)
+                            params_decohack.append(start_date)
+                        if end_date:
+                            time_conditions.append("created_at <= %s")
+                            params_discovered.append(end_date)
+                            params_decohack.append(end_date)
+
+                        if time_conditions:
+                            time_filter = "WHERE " + " AND ".join(time_conditions)
+
                     # 方案1: 从discovered_products表获取
                     # 使用窗口函数进行去重，保留每个产品名称的最新记录
-                    query_discovered = """
+                    query_discovered = f"""
                         SELECT dp1.*
                         FROM discovered_products dp1
                         INNER JOIN (
@@ -51,6 +75,7 @@ class ProductCatalogGenerator:
                                 LOWER(TRIM(product_name)) as normalized_name,
                                 MAX(created_at) as latest_created_at
                             FROM discovered_products
+                            {time_filter}
                             GROUP BY LOWER(TRIM(product_name))
                         ) dp2
                         ON LOWER(TRIM(dp1.product_name)) = dp2.normalized_name
@@ -59,7 +84,7 @@ class ProductCatalogGenerator:
                     """
 
                     # 方案2: 从rss_decohack_products表获取
-                    query_decohack = """
+                    query_decohack = f"""
                         SELECT
                             product_name,
                             tagline,
@@ -77,6 +102,7 @@ class ProductCatalogGenerator:
                                 LOWER(TRIM(product_name)) as normalized_name,
                                 MAX(created_at) as latest_created_at
                             FROM rss_decohack_products
+                            {time_filter}
                             GROUP BY LOWER(TRIM(product_name))
                         ) dp2
                         ON LOWER(TRIM(dp1.product_name)) = dp2.normalized_name
@@ -85,12 +111,12 @@ class ProductCatalogGenerator:
                     """
 
                     # 先从discovered_products获取
-                    cursor.execute(query_discovered)
+                    cursor.execute(query_discovered, params_discovered)
                     discovered_products = cursor.fetchall()
                     logger.info(f"从 discovered_products 获取到 {len(discovered_products)} 个去重产品")
 
                     # 再从rss_decohack_products获取
-                    cursor.execute(query_decohack)
+                    cursor.execute(query_decohack, params_decohack)
                     decohack_products = cursor.fetchall()
                     logger.info(f"从 rss_decohack_products 获取到 {len(decohack_products)} 个去重产品")
 
@@ -128,12 +154,16 @@ class ProductCatalogGenerator:
             logger.error(f"获取并去重产品失败: {e}")
             return []
 
-    def generate_catalog_markdown(self, products: List[Dict[str, Any]]) -> str:
+    def generate_catalog_markdown(self, products: List[Dict[str, Any]],
+                                   start_date: Optional[datetime] = None,
+                                   end_date: Optional[datetime] = None) -> str:
         """
         生成产品清单的Markdown报告
 
         Args:
             products: 产品列表
+            start_date: 开始日期（用于报告标题）
+            end_date: 结束日期（用于报告标题）
 
         Returns:
             Markdown格式的报告内容
@@ -166,14 +196,35 @@ class ProductCatalogGenerator:
         # 生成Markdown内容
         md_lines = []
 
-        # 标题
+        # 标题 - 根据时间范围生成不同的标题
         current_date = datetime.now().strftime('%Y-%m-%d')
-        md_lines.append(f"# 📦 产品发现清单 ({current_date})")
+        if start_date or end_date:
+            # 有时间筛选
+            if start_date and end_date:
+                time_range = f"{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}"
+            elif start_date:
+                time_range = f"{start_date.strftime('%Y-%m-%d')} 至今"
+            else:
+                time_range = f"截至 {end_date.strftime('%Y-%m-%d')}"
+            md_lines.append(f"# 📦 产品发现清单 ({time_range})")
+        else:
+            # 全部产品
+            md_lines.append(f"# 📦 产品发现清单 (全部产品 - {current_date})")
         md_lines.append("")
 
         # 概览
         md_lines.append("## 📊 概览统计")
         md_lines.append("")
+        if start_date or end_date:
+            # 显示筛选时间范围
+            if start_date and end_date:
+                md_lines.append(f"- **时间范围**: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+            elif start_date:
+                md_lines.append(f"- **时间范围**: {start_date.strftime('%Y-%m-%d')} 至今")
+            else:
+                md_lines.append(f"- **时间范围**: 截至 {end_date.strftime('%Y-%m-%d')}")
+        else:
+            md_lines.append(f"- **时间范围**: 全部产品")
         md_lines.append(f"- **总产品数**: {total_count}")
         md_lines.append("")
 
@@ -321,18 +372,32 @@ class ProductCatalogGenerator:
                 'error': str(e)
             }
 
-    def generate_and_push_catalog(self) -> Dict[str, Any]:
+    def generate_and_push_catalog(self, start_date: Optional[datetime] = None,
+                                   end_date: Optional[datetime] = None) -> Dict[str, Any]:
         """
         生成产品清单并推送到 Notion
+
+        Args:
+            start_date: 开始日期（可选）
+            end_date: 结束日期（可选）
 
         Returns:
             执行结果
         """
         try:
             logger.info("开始生成产品清单...")
+            if start_date or end_date:
+                time_range_str = ""
+                if start_date and end_date:
+                    time_range_str = f"{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}"
+                elif start_date:
+                    time_range_str = f"{start_date.strftime('%Y-%m-%d')} 至今"
+                else:
+                    time_range_str = f"截至 {end_date.strftime('%Y-%m-%d')}"
+                logger.info(f"时间范围: {time_range_str}")
 
             # 1. 获取去重后的所有产品
-            products = self.get_all_products_deduplicated()
+            products = self.get_all_products_deduplicated(start_date, end_date)
 
             if not products:
                 logger.warning("没有产品可生成清单")
@@ -345,7 +410,7 @@ class ProductCatalogGenerator:
             logger.info(f"获取到 {len(products)} 个产品，开始生成 Markdown 报告...")
 
             # 2. 生成 Markdown 报告
-            catalog_markdown = self.generate_catalog_markdown(products)
+            catalog_markdown = self.generate_catalog_markdown(products, start_date, end_date)
 
             logger.info(f"Markdown 报告生成完成，长度: {len(catalog_markdown)} 字符")
 

@@ -268,6 +268,33 @@ class Config:
             'parent_page_id': self._get_config_value('notion', 'parent_page_id', 'NOTION_PARENT_PAGE_ID', None)
         }
 
+    def get_weibo_config(self) -> Dict[str, Any]:
+        """获取微博RSS配置，优先级：环境变量 > config.ini > 默认值"""
+        # 获取用户ID列表
+        user_ids_str = self._get_config_value('weibo', 'user_ids', 'WEIBO_USER_IDS', '1402400261')
+        user_ids = [uid.strip() for uid in user_ids_str.split(',') if uid.strip()]
+
+        # 获取RSSHub前缀列表（默认为空，必须在配置中提供）
+        prefixes_str = self._get_config_value('weibo', 'rsshub_prefixes', 'WEIBO_RSSHUB_PREFIXES', '')
+        prefixes = [p.strip() for p in prefixes_str.split(',') if p.strip()]
+
+        # 获取最大重试次数
+        max_retries = self._get_config_value('weibo', 'max_retries', 'WEIBO_MAX_RETRIES', 5, int)
+
+        return {
+            'user_ids': user_ids,
+            'rsshub_prefixes': prefixes,
+            'max_retries': max_retries
+        }
+
+    def get_weibo_user_ids(self) -> List[str]:
+        """获取微博用户ID列表"""
+        return self.get_weibo_config()['user_ids']
+
+    def get_rsshub_prefixes(self) -> List[str]:
+        """获取RSSHub前缀列表"""
+        return self.get_weibo_config()['rsshub_prefixes']
+
 
 
 # 全局配置实例

@@ -434,10 +434,10 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS rss_decohack_products (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     product_name VARCHAR(100) NOT NULL COMMENT '产品名称',
-                    tagline VARCHAR(200) NOT NULL COMMENT '产品标语', 
+                    tagline VARCHAR(200) NOT NULL COMMENT '产品标语',
                     description VARCHAR(800) NOT NULL COMMENT '产品介绍',
                     product_url VARCHAR(400) COMMENT '产品官网链接',
-                    ph_url VARCHAR(400) COMMENT 'Product Hunt页面链接', 
+                    ph_url VARCHAR(400) COMMENT 'Product Hunt页面链接',
                     image_url VARCHAR(400) COMMENT '产品图片URL',
                     vote_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '投票数',
                     is_featured BOOLEAN DEFAULT FALSE COMMENT '是否精选',
@@ -450,8 +450,28 @@ class DatabaseManager:
                     INDEX idx_ph_publish (ph_publish_date),
                     INDEX idx_featured (is_featured),
                     INDEX idx_votes (vote_count DESC)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 COMMENT='Decohack产品热榜数据表 - 细粒度存储每个产品信息'
+            """,
+
+            'rss_weibo': """
+                CREATE TABLE IF NOT EXISTS rss_weibo (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id VARCHAR(50) NOT NULL COMMENT '微博用户ID',
+                    guid VARCHAR(512) UNIQUE NOT NULL COMMENT '微博唯一标识',
+                    title VARCHAR(512) COMMENT '微博标题/摘要',
+                    link VARCHAR(512) NOT NULL COMMENT '微博链接',
+                    author VARCHAR(255) COMMENT '作者名称',
+                    description TEXT COMMENT '微博内容',
+                    category VARCHAR(512) COMMENT '分类标签',
+                    published_at DATETIME COMMENT '发布时间',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间',
+                    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                    INDEX idx_user_id (user_id),
+                    INDEX idx_published (published_at),
+                    INDEX idx_link (link(255))
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                COMMENT='微博RSS数据表'
             """,
 
             'discovered_products': """

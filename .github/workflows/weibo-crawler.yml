@@ -1,0 +1,73 @@
+name: Weibo RSS Crawler
+
+on:
+  schedule:
+    # 北京时间 8:00-23:00 每半小时执行一次
+    # UTC 时间 0:00-15:00 (北京时间 = UTC + 8)
+    - cron: '0,30 0-15 * * *'  # 每半小时，从UTC 0:00到15:30
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  crawl-weibo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create config file
+        run: |
+          cat > config.ini << EOF
+          [database]
+          host = ${{ secrets.DB_HOST }}
+          port = ${{ secrets.DB_PORT }}
+          user = ${{ secrets.DB_USER }}
+          password = ${{ secrets.DB_PASSWORD }}
+          database = ${{ secrets.DB_NAME }}
+          skip_table_check = False
+
+          [weibo]
+          user_ids = ${{ secrets.WEIBO_USER_IDS }}
+          rsshub_prefixes = ${{ secrets.RSSHUB_PREFIXES }}
+          max_retries = 5
+          EOF
+
+      - name: Run Weibo crawler
+        run: |
+          echo "========================================="
+          echo "开始执行微博RSS爬取任务"
+          echo "北京时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+          echo "========================================="
+          python3.12 main.py --task crawl --feed weibo --output json
+        env:
+          TZ: Asia/Shanghai
+
+      - name: Display crawl results
+        if: always()
+        run: |
+          echo "========================================="
+          echo "任务执行完成"
+          echo "北京时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+          echo "========================================="
+          if [ -f rss_crawler.log ]; then
+            echo "最近的日志记录："
+            tail -n 50 rss_crawler.log
+          fi

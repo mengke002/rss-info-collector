@@ -34,7 +34,86 @@ class RSSParser:
         # Decohack解析相关的正则表达式
         self.vote_pattern = re.compile(r'🔺(\d+)')
         self.time_pattern = re.compile(r'(\d{4})年(\d{2})月(\d{2})日')
-    
+
+    @staticmethod
+    def _mask_prefix(prefix: str) -> str:
+        """脱敏前缀URL，使用-rsshub之前的子串+***"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(prefix)
+            domain = parsed.netloc or parsed.path
+
+            # 查找 -rsshub 或 -RSSHub 或 -rsshuber 等关键字
+            match = re.search(r'(.+?)-rsshub', domain.lower())
+            if match:
+                # 提取-rsshub之前的部分
+                prefix_part = match.group(1)
+                # 如果包含多级域名，只取最后一级
+                if '.' in prefix_part:
+                    prefix_part = prefix_part.split('.')[-1]
+                return f"{prefix_part}***"
+            else:
+                # 如果没有找到-rsshub，回退到前3个字符
+                return f"{domain[:3]}***"
+        except:
+            return "***"
+
+    def fetch_weibo_rss(self, user_id: str, prefixes: List[str], max_retries: int = 5) -> List[Dict[str, Any]]:
+        """
+        获取微博RSS，每个用户ID独立进行随机前缀重试
+
+        Args:
+            user_id: 微博用户ID
+            prefixes: RSSHub前缀列表
+            max_retries: 最大重试次数
+
+        Returns:
+            解析后的RSS条目列表
+        """
+        if not prefixes:
+            logger.error(f"微博用户 {user_id}: 未配置RSSHub前缀列表")
+            return []
+
+        # 随机打乱前缀列表，避免每次都按相同顺序尝试
+        shuffled_prefixes = random.sample(prefixes, len(prefixes))
+
+        attempts = 0
+        for idx, prefix in enumerate(shuffled_prefixes, 1):
+            if attempts >= max_retries:
+                logger.error(f"微博用户 {user_id}: 已达到最大重试次数 {max_retries}，停止尝试")
+                break
+
+            attempts += 1
+            url = f"{prefix.rstrip('/')}/weibo/user/{user_id}"
+            masked_prefix = self._mask_prefix(prefix)
+
+            try:
+                logger.info(f"微博用户 {user_id}: 尝试第 {attempts}/{max_retries} 次 (候选#{idx})")
+                response = self.session.get(url, timeout=self.timeout)
+                response.raise_for_status()
+
+                content = response.content.decode('utf-8', errors='ignore')
+                items = self._parse_xml_content(content, url)
+
+                if items:
+                    logger.info(f"微博用户 {user_id}: 成功获取 {len(items)} 条微博 (使用候选#{idx}: {masked_prefix})")
+                    # 为每条微博添加user_id字段
+                    for item in items:
+                        item['user_id'] = user_id
+                    return items
+                else:
+                    logger.warning(f"微博用户 {user_id}: 访问成功但未解析到条目 (候选#{idx})")
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"微博用户 {user_id}: 候选#{idx} 请求失败: {type(e).__name__}")
+                continue
+            except Exception as e:
+                logger.error(f"微博用户 {user_id}: 候选#{idx} 解析失败: {type(e).__name__}")
+                continue
+
+        logger.error(f"微博用户 {user_id}: 所有候选前缀都尝试失败")
+        return []
+
     def parse_feed(self, feed_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """解析RSS源"""
         strategy = feed_config.get('strategy', 'requests')

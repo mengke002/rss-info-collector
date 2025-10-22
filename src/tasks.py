@@ -22,6 +22,7 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
         'rss_techcrunch': ['title', 'link', 'full_content', 'image_url', 'guid', 'published_at'],
         'rss_ezindie': ['guid', 'title', 'link', 'author', 'summary', 'cover_image_url', 'full_content_markdown', 'published_at'],
         'rss_decohack_products': ['product_name', 'tagline', 'description', 'product_url', 'ph_url', 'image_url', 'vote_count', 'is_featured', 'keywords', 'ph_publish_date', 'crawl_date'],
+        'rss_weibo': ['user_id', 'guid', 'title', 'link', 'author', 'description', 'category', 'published_at', 'updated_at'],
     }
     if table_name not in table_columns:
         return items
@@ -92,6 +93,15 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
            'ph_url': 400,
            'image_url': 400,
            'keywords': 300,
+       },
+       'rss_weibo': {
+           'user_id': 50,
+           'guid': 512,
+           'title': 512,
+           'link': 512,
+           'author': 255,
+           'description': 65000,
+           'category': 512,
        }
     }
     normalized_items = []
@@ -110,6 +120,10 @@ def _normalize_items_for_db(items: List[Dict[str, Any]], table_name: str) -> Lis
 def run_crawl_task(db_manager: DatabaseManager, feed_to_crawl: str = None) -> Dict[str, Any]:
     """执行爬取任务"""
     logger.info("开始执行RSS爬取任务")
+
+    # 特殊处理：如果是 weibo，直接调用专门的任务函数
+    if feed_to_crawl and feed_to_crawl.lower() == 'weibo':
+        return run_weibo_crawl_task(db_manager)
 
     results = {
         'success': True,
@@ -824,7 +838,7 @@ def run_community_analysis_and_report_task(analysis_batch_size: int = 10, report
         }
 
 
-def run_product_catalog_export_task() -> Dict[str, Any]:
+def run_product_catalog_export_task(start_date=None, end_date=None) -> Dict[str, Any]:
     """
     导出所有产品清单任务
 
@@ -835,12 +849,25 @@ def run_product_catalog_export_task() -> Dict[str, Any]:
     4. 生成完整的产品清单 Markdown 报告
     5. 推送到 Notion
 
+    Args:
+        start_date: 开始日期（可选）
+        end_date: 结束日期（可选）
+
     Returns:
         执行结果字典
     """
     try:
         logger.info("=" * 60)
         logger.info("开始执行产品清单导出任务...")
+        if start_date or end_date:
+            if start_date and end_date:
+                logger.info(f"时间范围: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+            elif start_date:
+                logger.info(f"时间范围: {start_date.strftime('%Y-%m-%d')} 至今")
+            else:
+                logger.info(f"时间范围: 截至 {end_date.strftime('%Y-%m-%d')}")
+        else:
+            logger.info("时间范围: 全部产品")
         logger.info("=" * 60)
 
         from .product_catalog_generator import ProductCatalogGenerator
@@ -849,7 +876,7 @@ def run_product_catalog_export_task() -> Dict[str, Any]:
         catalog_generator = ProductCatalogGenerator()
 
         # 生成并推送产品清单
-        result = catalog_generator.generate_and_push_catalog()
+        result = catalog_generator.generate_and_push_catalog(start_date, end_date)
 
         if result.get('success'):
             logger.info("✅ 产品清单导出任务完成！")
@@ -879,4 +906,104 @@ def run_product_catalog_export_task() -> Dict[str, Any]:
         return {
             'success': False,
             'error': error_msg
+        }
+
+def run_weibo_crawl_task(db_manager: DatabaseManager) -> Dict[str, Any]:
+    """
+    执行微博RSS爬取任务
+
+    Args:
+        db_manager: 数据库管理器
+
+    Returns:
+        执行结果字典
+    """
+    logger.info("开始执行微博RSS爬取任务")
+
+    results = {
+        'success': True,
+        'users_processed': 0,
+        'items_inserted': 0,
+        'errors': []
+    }
+
+    try:
+        # 获取配置
+        user_ids = config.get_weibo_user_ids()
+        prefixes = config.get_rsshub_prefixes()
+
+        if not user_ids:
+            error_msg = "未配置微博用户ID列表"
+            logger.error(error_msg)
+            results['success'] = False
+            results['errors'].append(error_msg)
+            return results
+
+        if not prefixes:
+            error_msg = "未配置RSSHub前缀列表"
+            logger.error(error_msg)
+            results['success'] = False
+            results['errors'].append(error_msg)
+            return results
+
+        logger.info(f"配置检查完成 - 用户数: {len(user_ids)}, 前缀数: {len(prefixes)}")
+
+        # 获取已存在的GUID集合用于去重
+        existing_guids = db_manager.get_existing_guids('rss_weibo')
+        logger.info(f"数据库中已存在 {len(existing_guids)} 条微博记录")
+
+        # 对每个用户ID进行爬取
+        all_new_items = []
+        for user_id in user_ids:
+            try:
+                logger.info(f"开始爬取微博用户: {user_id}")
+
+                # 使用rss_parser的fetch_weibo_rss方法
+                items = rss_parser.fetch_weibo_rss(user_id, prefixes, max_retries=5)
+
+                if items:
+                    # 过滤新条目
+                    new_items = [item for item in items if item['guid'] not in existing_guids]
+
+                    if new_items:
+                        logger.info(f"微博用户 {user_id}: 获取到 {len(items)} 条，其中 {len(new_items)} 条为新微博")
+                        all_new_items.extend(new_items)
+                    else:
+                        logger.info(f"微博用户 {user_id}: 获取到 {len(items)} 条，但都已存在")
+
+                    results['users_processed'] += 1
+                else:
+                    logger.warning(f"微博用户 {user_id}: 未获取到任何微博")
+
+            except Exception as e:
+                error_msg = f"爬取微博用户 {user_id} 失败: {e}"
+                logger.error(error_msg, exc_info=True)
+                results['errors'].append(error_msg)
+
+        # 批量插入新条目
+        if all_new_items:
+            # 规范化数据
+            normalized_items = _normalize_items_for_db(all_new_items, 'rss_weibo')
+
+            # 批量插入
+            inserted_count = db_manager.insert_rss_items_batch('rss_weibo', normalized_items)
+            results['items_inserted'] = inserted_count
+            logger.info(f"成功插入 {inserted_count} 条新微博记录")
+        else:
+            logger.info("没有新的微博记录需要插入")
+
+        results['success'] = len(results['errors']) == 0
+        logger.info(f"微博RSS爬取任务完成 - 处理用户: {results['users_processed']}, 新增记录: {results['items_inserted']}")
+
+        return results
+
+    except Exception as e:
+        error_msg = f"执行微博RSS爬取任务失败: {e}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            'success': False,
+            'error': error_msg,
+            'users_processed': 0,
+            'items_inserted': 0,
+            'errors': [error_msg]
         }

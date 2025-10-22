@@ -15,7 +15,8 @@ from src.config import config
 from src.tasks import (
     run_crawl_task, run_cleanup_task, run_stats_task,
     run_product_discovery_analysis, run_report_generation_task,
-    run_tech_news_report_generation_task, run_product_catalog_export_task
+    run_tech_news_report_generation_task, run_product_catalog_export_task,
+    run_weibo_crawl_task
 )
 from src.report_generator import ProductDiscoveryReportGenerator, TechNewsReportGenerator
 from src.analyzer import TechNewsAnalyzer
@@ -115,7 +116,15 @@ def main():
                        help='科技新闻分析回溯的小时数（默认：24）')
     parser.add_argument('--custom-filter', action='store_true',
                        help='社区分析报告使用自定义筛选条件（48小时内indiehackers + 最新1篇ezindie）')
-    
+
+    # 产品清单导出时间筛选参数
+    parser.add_argument('--time-range', choices=['2weeks', '1month', '3months', 'custom', 'all'],
+                       default='all', help='产品清单时间范围（默认：all 全部产品）')
+    parser.add_argument('--start-date', type=str,
+                       help='自定义开始日期，格式：YYYY-MM-DD（需配合 --time-range custom 使用）')
+    parser.add_argument('--end-date', type=str,
+                       help='自定义结束日期，格式：YYYY-MM-DD（需配合 --time-range custom 使用）')
+
     args = parser.parse_args()
     
     print(f"RSS数据采集系统")
@@ -168,7 +177,41 @@ def main():
             use_custom_filter=args.custom_filter
         )
     elif args.task == 'product_catalog':
-        result = run_product_catalog_export_task()
+        # 处理时间范围参数
+        start_date = None
+        end_date = None
+
+        if args.time_range == 'custom':
+            # 自定义时间范围
+            if args.start_date:
+                try:
+                    start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+                except ValueError:
+                    print(f"错误：开始日期格式不正确，应为 YYYY-MM-DD")
+                    sys.exit(1)
+            if args.end_date:
+                try:
+                    end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
+                    # 设置为当天的最后一刻
+                    end_date = end_date.replace(hour=23, minute=59, second=59)
+                except ValueError:
+                    print(f"错误：结束日期格式不正确，应为 YYYY-MM-DD")
+                    sys.exit(1)
+        elif args.time_range == '2weeks':
+            # 近2周
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=14)
+        elif args.time_range == '1month':
+            # 近1个月
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)
+        elif args.time_range == '3months':
+            # 近3个月
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=90)
+        # else: args.time_range == 'all' 或未指定，start_date 和 end_date 保持 None
+
+        result = run_product_catalog_export_task(start_date, end_date)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)
@@ -237,11 +280,18 @@ def print_result(result: dict, task_type: str):
     if not result.get('success', False):
         print(f"❌ 任务失败: {result.get('error', '未知错误')}")
         return
-    
+
     if task_type == 'crawl':
         print(f"✅ 爬取任务完成")
-        print(f"   处理RSS源: {result.get('feeds_processed', 0)} 个")
-        print(f"   新增记录: {result.get('items_inserted', 0)} 条")
+        # 支持微博的显示
+        if 'users_processed' in result:
+            # 微博爬取任务
+            print(f"   处理用户: {result.get('users_processed', 0)} 个")
+            print(f"   新增微博: {result.get('items_inserted', 0)} 条")
+        else:
+            # 普通RSS爬取任务
+            print(f"   处理RSS源: {result.get('feeds_processed', 0)} 个")
+            print(f"   新增记录: {result.get('items_inserted', 0)} 条")
         if result.get('errors'):
             print(f"   错误: {len(result['errors'])} 个")
     
