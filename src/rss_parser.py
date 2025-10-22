@@ -247,7 +247,20 @@ class RSSParser:
                     if parsed_item:
                         items.append(parsed_item)
 
-            logger.info(f"Successfully parsed {url}: {len(items)} items")
+            # 对于微博链接，需要脱敏显示
+            if '/weibo/user/' in url:
+                # 提取用户ID和前缀进行脱敏
+                user_id_match = re.search(r'/weibo/user/(\d+)', url)
+                if user_id_match:
+                    user_id = user_id_match.group(1)
+                    prefix = url.split('/weibo/user/')[0]
+                    masked_prefix = self._mask_prefix(prefix)
+                    logger.info(f"成功解析微博内容: 用户ID={user_id}, 前缀={masked_prefix}, 条目数={len(items)}")
+                else:
+                    logger.info(f"成功解析RSS内容: {len(items)} 条")
+            else:
+                # 其他RSS源，直接显示条目数即可，不需要显示完整URL
+                logger.info(f"成功解析RSS内容: {len(items)} 条")
             return items
         except ET.ParseError as e:
             logger.error(f"XML解析失败 {url}: {e}")
