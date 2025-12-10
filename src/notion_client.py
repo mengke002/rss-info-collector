@@ -1106,14 +1106,36 @@ class NotionClient:
                         table_data = block.get("table", {})
                         for row in table_data.get("children", []):
                             if row.get("type") == "table_row":
-                                for cell in row.get("table_row", {}).get("cells", []):
+                                row_cells = row.get("table_row", {}).get("cells", [])
+                                for i, cell in enumerate(row_cells):
+                                    current_cell_length = 0
+                                    new_cell = []
+                                    truncated = False
+
                                     for text_item in cell:
                                         if text_item.get("text", {}).get("content"):
                                             content = text_item["text"]["content"]
-                                            if len(content) > 2000:
-                                                original_length = len(content)
-                                                text_item["text"]["content"] = content[:1997] + "..."
-                                                self.logger.debug(f"表格单元格文本被截断: {original_length} -> 2000字符")
+                                            content_len = len(content)
+
+                                            if current_cell_length + content_len > 2000:
+                                                # 需要截断
+                                                allowed_len = 2000 - current_cell_length
+                                                if allowed_len > 0:
+                                                    text_item["text"]["content"] = content[:allowed_len]
+                                                    new_cell.append(text_item)
+
+                                                truncated = True
+                                                self.logger.debug(f"表格单元格被截断到2000字符")
+                                                break
+                                            else:
+                                                new_cell.append(text_item)
+                                                current_cell_length += content_len
+                                        else:
+                                            new_cell.append(text_item)
+
+                                    # 如果发生了截断，更新单元格内容
+                                    if truncated:
+                                        row_cells[i] = new_cell
 
                     validated_blocks.append(block)
                 except Exception as e:
